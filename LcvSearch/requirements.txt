@@ -1,0 +1,24 @@
+# LcvSearch：Django 搜索站 + Scrapy 爬虫（合并后统一依赖）
+# ============ Django 后端 ============
+django>=4.2
+elasticsearch-dsl>=8,<9
+elasticsearch>=8,<9
+redis
+requests
+jieba                    # 统计页词频（词云数据）
+
+# ============ Scrapy 爬虫 ============
+scrapy>=2.13                       # start() 异步入口 / 新版中间件签名
+scrapy-playwright>=0.0.34          # 动态渲染（替代 Selenium）
+playwright>=1.40                   # 安装后需执行: playwright install chromium
+browserforge                       # 成套浏览器指纹头（UA + client hints）
+lxml
+Twisted
+APScheduler>=3.10                  # 爬虫定时任务（cron 表达式）
+
+# ============ 生产部署 ============
+gunicorn>=21.2              # WSGI 服务器（Docker 生产环境使用）
+
+# ============ 开发/测试（可选） ============
+pytest-django
+coverage

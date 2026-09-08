@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LcvSearch 项目代码审查报告</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #303133; line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #1f2d3d; }
+  .subtitle { color: #909399; font-size: 14px; margin-bottom: 24px; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .card h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid #ebeef5; display: flex; align-items: center; gap: 8px; }
+  .card h2 .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: normal; }
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .chart-box { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .chart-box h3 { font-size: 15px; margin-bottom: 8px; color: #606266; }
+  .chart { width: 100%; height: 280px; }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-btn { padding: 6px 14px; border: 1px solid #dcdfe6; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  .filter-btn:hover { border-color: #409eff; color: #409eff; }
+  .filter-btn.active { background: #409eff; color: #fff; border-color: #409eff; }
+  .issue { border: 1px solid #ebeef5; border-radius: 8px; margin-bottom: 12px; overflow: hidden; transition: all 0.2s; }
+  .issue:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .issue-header { padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: #fafafa; }
+  .issue-header:hover { background: #f0f2f5; }
+  .severity { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+  .severity.critical { background: #fef0f0; color: #f56c6c; }
+  .severity.medium { background: #fdf6ec; color: #e6a23c; }
+  .severity.optimization { background: #f0f9eb; color: #67c23a; }
+  .issue-title { flex: 1; font-size: 14px; font-weight: 500; }
+  .issue-file { font-size: 12px; color: #909399; font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .issue-body { padding: 16px; display: none; border-top: 1px solid #ebeef5; }
+  .issue.open .issue-body { display: block; }
+  .issue-body p { margin-bottom: 10px; font-size: 13.5px; }
+  .code-block { background: #1e1e1e; color: #d4d4d4; padding: 12px 14px; border-radius: 6px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; overflow-x: auto; margin: 8px 0; line-height: 1.5; }
+  .code-block .bug { color: #f56c6c; text-decoration: underline wavy #f56c6c; }
+  .code-block .fix { color: #67c23a; }
+  .code-block .comment { color: #6a9955; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; background: #ecf5ff; color: #409eff; margin-right: 4px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .summary-item { background: #fff; border-radius: 10px; padding: 16px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .summary-item .num { font-size: 32px; font-weight: 700; }
+  .summary-item .label { font-size: 13px; color: #909399; margin-top: 4px; }
+  .summary-item.critical .num { color: #f56c6c; }
+  .summary-item.medium .num { color: #e6a23c; }
+  .summary-item.optimization .num { color: #67c23a; }
+  .summary-item.total .num { color: #409eff; }
+  .priority-list { list-style: none; }
+  .priority-list li { padding: 10px 0; border-bottom: 1px solid #f0f2f5; font-size: 14px; display: flex; gap: 10px; align-items: flex-start; }
+  .priority-list li:last-child { border-bottom: none; }
+  .priority-num { width: 24px; height: 24px; border-radius: 50%; background: #409eff; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; margin-top: 2px; }
+  .arrow { color: #c0c4cc; font-size: 12px; transition: transform 0.2s; }
+  .issue.open .arrow { transform: rotate(90deg); }
+  @media (max-width: 768px) {
+    .charts-row { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔍 LcvSearch 项目代码审查报告</h1>
+  <div class="subtitle">审查范围：ArticleSpider / LcvSearch / ScrapyRedisTest / frontend &nbsp;|&nbsp; 审查日期：2026-09-08</div>
+
+  <div class="summary-grid">
+    <div class="summary-item total"><div class="num">30</div><div class="label">问题总数</div></div>
+    <div class="summary-item critical"><div class="num">5</div><div class="label">🔴 严重 Bug</div></div>
+    <div class="summary-item medium"><div class="num">10</div><div class="label">🟡 中等 Bug</div></div>
+    <div class="summary-item optimization"><div class="num">15</div><div class="label">🟢 优化建议</div></div>
+  </div>
+
+  <div class="charts-row">
+    <div class="chart-box">
+      <h3>问题严重程度分布</h3>
+      <div id="chartSeverity" class="chart"></div>
+    </div>
+    <div class="chart-box">
+      <h3>问题模块分布</h3>
+      <div id="chartModule" class="chart"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📋 修复优先级建议</h2>
+    <ol class="priority-list">
+      <li><span class="priority-num">1</span><div><b>修复 ArticleSpider/pipelines.py 的方法签名</b>——<code>open_spider</code> 和 <code>process_item</code> 缺少 spider 参数，导致整个 ES 入库管道完全不可用，所有爬虫数据无法写入搜索索引。</div></li>
+      <li><span class="priority-num">2</span><div><b>修复 ScrapyRedisTest/jobbole.py 的翻页变量名错误</b>——<code>next_url</code> 被误写为 <code>post_url</code>，分布式爬虫翻页功能完全失效；同时初始化 <code>fail_urls</code> 属性。</div></li>
+      <li><span class="priority-num">3</span><div><b>为所有 B站 API 爬虫添加 JSON 解析异常保护</b>——<code>bilibili_hot</code>、<code>bilibili_weekly</code>、<code>bilibili_comments</code> 在触发风控（412/403）时响应体为 HTML，<code>json.loads</code> 会抛异常导致爬虫崩溃。</div></li>
+      <li><span class="priority-num">4</span><div><b>修复 api_comments_fetch 和 crawl_manager 的文件句柄泄漏</b>——使用 <code>with</code> 语句管理日志文件，避免子进程异常时句柄泄漏。</div></li>
+      <li><span class="priority-num">5</span><div><b>将硬编码配置（ES 地址、SECRET_KEY、DEBUG）改为环境变量读取</b>——提升部署灵活性和安全性。</div></li>
+      <li><span class="priority-num">6</span><div><b>合并两个项目的 llm_client.py 为公共模块</b>——消除代码重复，统一维护。</div></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>🐛 详细问题清单 <span class="badge" id="issueCount">30 项</span></h2>
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all">全部</button>
+      <button class="filter-btn" data-filter="critical">🔴 严重</button>
+      <button class="filter-btn" data-filter="medium">🟡 中等</button>
+      <button class="filter-btn" data-filter="optimization">🟢 优化</button>
+    </div>
+    <div id="issueList"></div>
+  </div>
+
+  <div class="card">
+    <h2>📁 项目架构概览</h2>
+    <p style="font-size:14px; margin-bottom:12px;">本项目是一个基于 Scrapy 的分布式搜索引擎教学项目，包含四个核心模块：</p>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+      <div style="padding:12px; background:#f5f7fa; border-radius:8px;">
+        <b style="color:#409eff;">🕷 ArticleSpider</b><br>
+        <span style="font-size:13px; color:#606266;">Scrapy 爬虫项目，含 B站热门/每周必看/评论、豆瓣Top250、quotes演示站，支持 Playwright 渲染、LLM 抽取自愈、指纹头/代理中间件，数据写入 Elasticsearch。</span>
+      </div>
+      <div style="padding:12px; background:#f5f7fa; border-radius:8px;">
+        <b style="color:#67c23a;">🔍 LcvSearch</b><br>
+        <span style="font-size:13px; color:#606266;">Django 后端，提供关键词搜索、RAG 问答（DeepSeek + numpy 向量库）、实时联邦搜索、爬虫任务管理等 JSON API，纯 API 架构对接前端。</span>
+      </div>
+      <div style="padding:12px; background:#f5f7fa; border-radius:8px;">
+        <b style="color:#e6a23c;">⚡ ScrapyRedisTest</b><br>
+        <span style="font-size:13px; color:#606266;">Scrapy-Redis 分布式爬虫演示，伯乐在线文章爬虫，使用 Redis 共享请求队列和去重过滤器，是课程分布式部分的教学示例。</span>
+      </div>
+      <div style="padding:12px; background:#f5f7fa; border-radius:8px;">
+        <b style="color:#7c3aed;">🎨 frontend</b><br>
+        <span style="font-size:13px; color:#606266;">Vue 3 + Vite + Element Plus 前端 SPA，包含搜索、榜单、AI问答、数据概览、采集管理五个视图，通过 API 与后端交互。</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const issues = [
+  // ========== 严重 Bug ==========
+  {
+    id: 1, severity: 'critical', module: 'ArticleSpider',
+    file: 'ArticleSpider/pipelines.py', line: 'L88-L122',
+    title: 'ES 入库管道方法签名错误，导致整个管道完全不可用',
+    desc: 'Scrapy Item Pipeline 的标准方法签名是 <code>open_spider(self, spider)</code> 和 <code>process_item(self, item, spider)</code>，但本文件中两个方法都缺少 <code>spider</code> 参数。Scrapy 调用时会传入 spider 参数，导致 <code>TypeError</code>，爬虫启动时管道初始化失败，所有数据无法写入 ES。',
+    code: `<span class="comment"># 当前代码（错误）</span>
+def open_spider(self):           <span class="bug"># 缺少 spider 参数</span>
+    ...
+
+def process_item(self, item):    <span class="bug"># 缺少 spider 参数</span>
+    spider = self.crawler.spider  <span class="comment"># 用了 self.crawler.spider 代替，但方法本身会因参数错误先崩溃</span>
+    ...
+
+<span class="comment"># 修复后</span>
+def open_spider(self, spider):    <span class="fix"># 加上 spider 参数</span>
+    ...
+
+def process_item(self, item, spider):  <span class="fix"># 加上 spider 参数</span>
+    ...`,
+    impact: '所有爬虫的 ES 入库功能完全失效，搜索索引无数据，RAG 问答无语料。'
+  },
+  {
+    id: 2, severity: 'critical', module: 'ScrapyRedisTest',
+    file: 'ScrapyRedisTest/spiders/jobbole.py', line: 'L36-L38',
+    title: '翻页 URL 变量名错误，next_url 被误写为 post_url',
+    desc: '提取下一页 URL 后存入 <code>next_url</code> 变量，但 yield Request 时使用了 <code>post_url</code>（当前文章 URL），导致翻页请求永远指向最后一篇文章，翻页功能完全失效。这是典型的复制粘贴错误。',
+    code: `next_url = response.css(".next.page-numbers::attr(href)").extract_first("")
+if next_url:
+    yield Request(url=parse.urljoin(response.url, <span class="bug">post_url</span>), callback=self.parse)
+    <span class="comment"># ↑ 应该是 next_url，post_url 是上一个循环中的文章链接</span>`,
+    impact: '分布式爬虫只能抓取第一页列表，无法翻页获取更多文章。'
+  },
+  {
+    id: 3, severity: 'critical', module: 'ScrapyRedisTest',
+    file: 'ScrapyRedisTest/spiders/jobbole.py', line: 'L24-L26',
+    title: 'self.fail_urls 未在 __init__ 中初始化，404 时 AttributeError',
+    desc: '在 <code>parse</code> 方法中使用 <code>self.fail_urls.append(response.url)</code> 收集 404 URL，但 <code>fail_urls</code> 属性从未在 <code>__init__</code> 中初始化。当遇到 404 页面时会抛出 <code>AttributeError: \'JobboleSpider\' object has no attribute \'fail_urls\'</code>。',
+    code: `def parse(self, response):
+    if response.status == 404:
+        <span class="bug">self.fail_urls.append(response.url)</span>  <span class="comment"># fail_urls 从未定义</span>
+        self.crawler.stats.inc_value("failed_url")
+
+<span class="comment"># 修复：在 __init__ 中初始化</span>
+def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.fail_urls = []`,
+    impact: '遇到 404 页面时爬虫崩溃。'
+  },
+  {
+    id: 4, severity: 'critical', module: 'ArticleSpider',
+    file: 'ArticleSpider/spiders/bilibili_hot.py + bilibili_weekly.py + bilibili_comments.py',
+    line: '多处',
+    title: 'B站 API 爬虫缺少 JSON 解析异常保护，风控时返回 HTML 导致崩溃',
+    desc: '三个 B站 API 爬虫都直接使用 <code>json.loads(response.text)</code> 解析响应，虽然设置了 <code>HANDLE_HTTPSTATUS_LIST = [412, 403]</code> 让风控响应进入 parse，但 412/403 响应体是 HTML 而非 JSON，<code>json.loads</code> 会抛出 <code>JSONDecodeError</code> 导致爬虫崩溃。应在解析前检查状态码或用 try-except 包裹。',
+    code: `<span class="comment"># bilibili_hot.py L62（其他两个爬虫同理）</span>
+def parse_list(self, response):
+    <span class="bug">data = json.loads(response.text)</span>  <span class="comment"># 412 时 response.text 是 HTML，直接崩溃</span>
+    code = data.get("code")
+
+<span class="comment"># 修复</span>
+def parse_list(self, response):
+    if response.status in (412, 403):
+        self.logger.warning("B站风控拦截 (status=%s)", response.status)
+        self.crawler.stats.inc_value("bilibili/api_rejected")
+        return
+    try:
+        data = json.loads(response.text)
+    except json.JSONDecodeError:
+        self.logger.warning("响应不是合法 JSON (status=%s)", response.status)
+        return`,
+    impact: '触发 B站风控时爬虫崩溃，无法优雅降级。'
+  },
+  {
+    id: 5, severity: 'critical', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L297-L326',
+    title: 'api_comments_fetch 日志文件句柄泄漏，subprocess 异常时未关闭',
+    desc: '在 <code>_run</code> 函数中打开日志文件 <code>log = open(...)</code>，然后调用 <code>subprocess.run(...)</code>，最后 <code>log.close()</code>。但如果 <code>subprocess.run</code> 抛出异常（如 timeout），<code>log.close()</code> 不会执行，导致文件句柄泄漏。应使用 <code>with</code> 语句管理文件。',
+    code: `def _run():
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log = open(os.path.join(LOG_DIR, "cmt_fetch_{}.log".format(bvid)), "w")
+        subprocess.run([...], timeout=COMMENT_FETCH_TIMEOUT)
+        <span class="bug">log.close()</span>  <span class="comment"># 如果上面 subprocess.run 抛异常，这里不会执行</span>
+    except Exception as e:
+        logger.error(...)
+    finally:
+        ...
+
+<span class="comment"># 修复：用 with 语句</span>
+def _run():
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_path = os.path.join(LOG_DIR, "cmt_fetch_{}.log".format(bvid))
+        <span class="fix">with open(log_path, "w") as log:</span>
+            subprocess.run([...], timeout=COMMENT_FETCH_TIMEOUT)
+    except Exception as e:
+        logger.error(...)`,
+    impact: '评论抓取超时或异常时文件句柄泄漏，长时间运行可能耗尽文件描述符。'
+  },
+
+  // ========== 中等 Bug ==========
+  {
+    id: 6, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/crawl_manager.py', line: 'L60-L79',
+    title: 'CrawlManager 日志文件句柄管理不当，依赖下一次 start 关闭',
+    desc: '<code>start</code> 方法中打开日志文件后赋值给 <code>self._log_file</code>，注释说"进程结束后在下一次 start 时关闭"。但如果进程结束后不再调用 start，句柄就泄漏了。而且在进程仍在运行时关闭日志文件可能导致子进程写入失败。此外 <code>status()</code> 读取日志也未用 <code>with</code>。',
+    code: `log_file = open(self._log_path, "w")
+self._proc = subprocess.Popen(cmd, cwd=SPIDER_DIR, stdout=log_file, stderr=subprocess.STDOUT)
+self._log_file = log_file  <span class="comment"># 进程结束后在下一次 start 时关闭，避免句柄泄漏</span>
+<span class="comment"># ↑ 这种设计不可靠，应在进程结束回调中关闭</span>`,
+    impact: '采集任务日志文件句柄可能泄漏；频繁启动采集任务时风险累积。'
+  },
+  {
+    id: 7, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L62-L75',
+    title: 'api_search 选择榜单来源时忽略用户搜索关键词',
+    desc: '当 <code>source in RANKING_SOURCES</code>（bilibili_hot / bilibili_weekly）时，<code>query_body</code> 被覆盖为 <code>{"term": {"source": source}}</code>，完全忽略了用户输入的搜索关键词 <code>q</code>。如果用户在搜索框输入关键词并选择了 B站热门来源，结果不会按关键词过滤，而是返回全部榜单数据。',
+    code: `if source in RANKING_SOURCES:
+    query_body = {"term": {"source": source}}  <span class="bug"># 忽略了 query 关键词</span>
+else:
+    body = {"must": query_body, ...}  <span class="comment"># 正常路径有关键词</span>`,
+    impact: '用户在搜索页选择榜单来源后，关键词搜索失效，返回全量榜单数据。'
+  },
+  {
+    id: 8, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/live_sources.py', line: 'L44-L87',
+    title: 'search_bilibili 每次调用都创建新 Session，WBI mixin key 未缓存',
+    desc: '<code>search_bilibili</code> 函数每次调用都创建新的 <code>requests.Session()</code>（而模块级已有 <code>_SESSION</code>），且每次都重新请求 nav 接口获取 WBI mixin key。mixin key 通常有效期数小时，可以缓存以减少请求次数和延迟。新 Session 也无法复用 TCP 连接池。',
+    code: `def search_bilibili(query, page=1):
+    session = requests.Session()  <span class="bug"># 每次新建，模块级已有 _SESSION</span>
+    session.headers.update(...)
+    session.get(_BILI_HOME, timeout=10)  <span class="comment"># 取 buvid cookie</span>
+    mixin = _wbi_mixin_key(session)  <span class="bug"># 每次重新获取，可缓存</span>`,
+    impact: '实时搜索延迟增加，不必要的 API 请求消耗。'
+  },
+  {
+    id: 9, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/live_sources.py', line: 'L174-L188',
+    title: '_cache_to_es 动态修改 sys.path 导入 pipelines，方式脆弱且有副作用',
+    desc: '<code>_cache_to_es</code> 通过动态修改 <code>sys.path</code> 来导入 ArticleSpider 的 <code>pipelines</code> 模块。这种方式比较脆弱：路径计算依赖目录结构，且导入 <code>pipelines</code> 模块时会执行模块级的 <code>connections.create_connection()</code>，可能产生意外副作用。更好的方式是将 ES 入库逻辑抽取为独立公共模块，或在 LcvSearch 中直接用 elasticsearch 客户端写入。',
+    code: `spider_pkg = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "ArticleSpider", "ArticleSpider"))
+if spider_pkg not in sys.path:
+    sys.path.insert(0, spider_pkg)  <span class="bug"># 动态改 sys.path，脆弱</span>
+from pipelines import index_item  <span class="bug"># 导入会触发模块级 ES 连接注册</span>`,
+    impact: '目录结构变化时导入失败；模块级副作用难以追踪。'
+  },
+  {
+    id: 10, severity: 'medium', module: 'ArticleSpider',
+    file: 'ArticleSpider/pipelines.py', line: 'L25',
+    title: '模块级 ES 连接创建无保护，import 时可能产生副作用',
+    desc: '模块级 <code>connections.create_connection(hosts=[...], timeout=10)</code> 在 import 时就执行。虽然 elasticsearch-dsl 的连接创建是懒加载（不会立即连接），但在某些环境下可能产生意外行为。且这个模块级连接与 <code>open_spider</code> 中创建的连接可能冲突。建议延迟到 <code>open_spider</code> 中创建，或加 try-except 保护。',
+    code: `<span class="comment"># 模块级，import 时执行</span>
+connections.create_connection(hosts=["http://127.0.0.1:9200"], timeout=10)  <span class="bug"># 无保护</span>`,
+    impact: '模块导入时的副作用难以控制；多进程环境下可能产生连接冲突。'
+  },
+  {
+    id: 11, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/ai_rag.py', line: 'L43-L63',
+    title: 'VectorStore.upsert 非线程安全，并发写入可能数据损坏',
+    desc: '<code>upsert</code> 方法修改 <code>self.matrix</code> 和 <code>self.meta</code> 后调用 <code>save()</code> 写入文件。如果多个线程同时调用（如管理命令与 Web 请求并发），会有竞态条件，可能导致矩阵维度不匹配或元数据与向量错位。虽然当前场景中 build_vector_index 是单独运行的管理命令，但建议加锁保护。',
+    code: `def upsert(self, items, vectors):
+    ...
+    if keep_vecs:
+        self.matrix = np.vstack([self.matrix, new_block])  <span class="bug"># 并发修改无锁</span>
+        self.meta.extend(...)  <span class="bug"># meta 与 matrix 可能错位</span>
+    self.save()`,
+    impact: '并发构建向量索引时可能数据损坏或文件写入冲突。'
+  },
+  {
+    id: 12, severity: 'medium', module: 'ScrapyRedisTest',
+    file: 'ScrapyRedisTest/settings.py', line: 'L53-L57',
+    title: 'scrapy_redis 配置缺少 Redis 连接参数，依赖默认 localhost',
+    desc: '配置了 <code>SCHEDULER</code> 和 <code>DUPEFILTER_CLASS</code> 使用 scrapy_redis，但没有配置 <code>REDIS_URL</code> 或 <code>REDIS_HOST</code>/<code>REDIS_PORT</code>/<code>REDIS_PARAMS</code>。scrapy_redis 默认连接 <code>localhost:6379</code> 无密码，但教学演示中应显式配置并加注释说明，避免用户在非默认环境下困惑。',
+    code: `SCHEDULER = "scrapy_redis.scheduler.Scheduler"
+DUPEFILTER_CLASS = "scrapy_redis.dupefilter.RFPDupeFilter"
+ITEM_PIPELINES = {
+    'scrapy_redis.pipelines.RedisPipeline': 300
+}
+<span class="comment"># 缺少 REDIS_URL / REDIS_HOST 配置</span>`,
+    impact: '非默认 Redis 环境下连接失败；教学示例不够完整。'
+  },
+  {
+    id: 13, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/LcvSearch/settings.py', line: 'L23-L28',
+    title: 'SECRET_KEY 硬编码、DEBUG=True、ALLOWED_HOSTS 为空',
+    desc: 'Django 生产环境安全配置问题：<code>SECRET_KEY</code> 硬编码在代码中（应从环境变量读取），<code>DEBUG=True</code>（生产环境应关闭，否则会暴露敏感信息），<code>ALLOWED_HOSTS = []</code>（只允许 localhost，部署时需配置）。虽然是教学项目，但建议提供环境变量覆盖方式。',
+    code: `SECRET_KEY = '5)$op9fxf2b#%(*_-qcr7sf)*c@gr!v=d851(*3f*2gef0f!#d'  <span class="bug"># 硬编码</span>
+DEBUG = True  <span class="bug"># 生产应关闭</span>
+ALLOWED_HOSTS = []  <span class="bug"># 部署需配置</span>`,
+    impact: '部署到生产环境时存在安全风险。'
+  },
+  {
+    id: 14, severity: 'medium', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L34-L35',
+    title: 'ES_URL 和 INDEX 硬编码，未从 Django settings 读取',
+    desc: '<code>ES_URL = "http://127.0.0.1:9200"</code> 和 <code>INDEX = "quotes"</code> 直接硬编码在视图文件中，而 ArticleSpider 的 settings.py 中也有同样的硬编码。应统一从 Django settings 或环境变量读取，避免多处分发不一致。',
+    code: `ES_URL = "http://127.0.0.1:9200"  <span class="bug"># 硬编码</span>
+INDEX = "quotes"  <span class="bug"># 硬编码</span>
+client = Elasticsearch(ES_URL)`,
+    impact: 'ES 地址变更时需修改多处代码；环境切换不灵活。'
+  },
+  {
+    id: 15, severity: 'medium', module: 'frontend',
+    file: 'frontend/src/views/SearchView.vue', line: 'L160-L166',
+    title: '搜索建议请求存在竞态条件，旧请求可能覆盖新结果',
+    desc: '<code>watch(query)</code> 中用 <code>setTimeout</code> 防抖，但没有取消上一次未完成的请求。如果用户快速输入，旧请求的响应可能晚于新请求返回，导致建议列表显示旧关键词的结果。建议用 AbortController 取消旧请求或加请求序号校验。',
+    code: `watch(query, () => {
+  clearTimeout(suggestTimer)
+  suggestTimer = setTimeout(async () => {
+    try { suggestions.value = await api.suggest(query.value) }  <span class="bug"># 旧请求可能覆盖新结果</span>
+    catch { suggestions.value = [] }
+  }, 250)
+})`,
+    impact: '快速输入时搜索建议可能显示旧关键词的结果。'
+  },
+
+  // ========== 优化建议 ==========
+  {
+    id: 16, severity: 'optimization', module: 'ArticleSpider + LcvSearch',
+    file: 'ArticleSpider/ai/llm_client.py + LcvSearch/search/llm_client.py',
+    line: '全文',
+    title: '两个项目的 llm_client.py 代码重复，应合并为公共模块',
+    desc: 'ArticleSpider 和 LcvSearch 各有一份 <code>llm_client.py</code>，但实现不同：ArticleSpider 版本支持 <code>chat_json</code>、<code>images_b64</code>、VLM 配置；LcvSearch 版本支持 <code>embed_texts</code>（向量化）。两个版本的 <code>chat</code> 函数签名也不同。建议合并为一个公共模块（如 <code>common/llm_client.py</code>），统一维护，避免修改一处遗漏另一处。',
+    code: `<span class="comment"># ArticleSpider 版本：支持 chat_json / VLM</span>
+def chat(messages, model=None, temperature=0.0, max_tokens=2048, ...)
+def chat_json(prompt, schema_hint=None, images_b64=None, ...)
+
+<span class="comment"># LcvSearch 版本：支持 embed_texts</span>
+def chat(messages, temperature=0.2, max_tokens=2048, timeout=TIMEOUT)  <span class="comment"># 签名不同！</span>
+def embed_texts(texts, timeout=TIMEOUT)`,
+    impact: '代码重复，维护成本高，修改时容易遗漏。'
+  },
+  {
+    id: 17, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L170-L195',
+    title: '_word_freq 函数内冗余 import time，且每次拉取 800 条文档',
+    desc: '函数内 <code>import time as _time</code> 是冗余的（文件顶部已 <code>import time</code>）。此外每次计算词频都从 ES 拉取 800 条文档的 title+content，数据量大时可能影响性能。建议增加缓存（已有 300 秒缓存），或用 ES 的 terms aggregation 做词频统计（虽然中文分词的聚合效果有限）。',
+    code: `def _word_freq(limit=40):
+    import time as _time  <span class="bug"># 冗余，顶部已 import time</span>
+    ...
+    resp = client.search(index=INDEX, query={"match_all": {}}, size=800, ...)  <span class="comment"># 每次拉 800 条</span>`,
+    impact: '代码不整洁；数据量大时词频计算较慢。'
+  },
+  {
+    id: 18, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/live_sources.py', line: 'L91-L120',
+    title: 'search_netease 中无意义的 _time 占位代码',
+    desc: '函数顶部 <code>import time as _time</code>，但函数内唯一使用是 <code>_ = _time  # 占位保持结构</code>，这是完全无意义的代码。应移除 import 和占位行。',
+    code: `def search_netease(query, page=1):
+    import time as _time  <span class="bug"># 未实际使用</span>
+    ...
+    _ = _time  # 占位保持结构  <span class="bug"># 无意义代码</span>`,
+    impact: '代码冗余，影响可读性。'
+  },
+  {
+    id: 19, severity: 'optimization', module: 'ScrapyRedisTest',
+    file: 'ScrapyRedisTest/spiders/jobbole.py', line: 'L40-L41',
+    title: 'parse_detail 方法为空实现，文章详情解析未完成',
+    desc: '<code>parse_detail</code> 方法只有 <code>pass</code>，没有实际的文章详情解析逻辑。作为分布式爬虫教学示例，至少应解析标题、正文、发布时间等字段并 yield Item，否则爬虫只能获取列表页的封面图和 URL，没有实际数据。',
+    code: `def parse_detail(self, response):
+    pass  <span class="bug"># 空实现</span>`,
+    impact: '爬虫只能抓取列表页信息，文章详情数据缺失。'
+  },
+  {
+    id: 20, severity: 'optimization', module: 'ArticleSpider',
+    file: 'ArticleSpider/settings.py', line: 'L60-L61',
+    title: 'ES_HOSTS 和 ES_INDEX 硬编码，应支持环境变量覆盖',
+    desc: '<code>ES_HOSTS = ["http://127.0.0.1:9200"]</code> 和 <code>ES_INDEX = "quotes"</code> 硬编码在 settings 中，与 LcvSearch 中的硬编码重复。应支持从环境变量读取，方便在不同环境（开发/测试/生产）切换。',
+    code: `ES_HOSTS = ["http://127.0.0.1:9200"]  <span class="bug"># 硬编码</span>
+ES_INDEX = "quotes"  <span class="bug"># 硬编码</span>`,
+    impact: '环境切换不灵活，需修改代码。'
+  },
+  {
+    id: 21, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/ai_rag.py', line: 'L84-L95',
+    title: 'build_items_from_es 每次创建新 ES 客户端，与 api_views 不一致',
+    desc: '<code>build_items_from_es</code> 函数内每次调用都创建新的 <code>Elasticsearch("http://127.0.0.1:9200")</code> 客户端，而 <code>api_views.py</code> 中是模块级单例。不一致的客户端管理方式可能导致连接池浪费。建议复用模块级客户端或从 settings 读取地址。',
+    code: `def build_items_from_es(index="quotes", limit=2000, content_chars=1500):
+    from elasticsearch import Elasticsearch
+    client = Elasticsearch("http://127.0.0.1:9200")  <span class="bug"># 每次新建，地址硬编码</span>`,
+    impact: '连接池浪费；地址硬编码与其他模块不一致。'
+  },
+  {
+    id: 22, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/LcvSearch/middleware.py', line: '全文',
+    title: 'CORS 中间件不支持 credentials 和自定义 header，可扩展性差',
+    desc: '自定义 CORS 中间件只允许 <code>Content-Type</code> 一个请求头，不支持 <code>Access-Control-Allow-Credentials</code>，也不支持动态配置允许的方法和头。如果后续需要添加认证（如 Authorization header）或 cookie 跨域，需要修改中间件。对于教学项目可以接受，但建议至少加注释说明扩展方式。',
+    code: `response["Access-Control-Allow-Headers"] = "Content-Type"  <span class="comment"># 只允许 Content-Type</span>
+<span class="comment"># 缺少 Access-Control-Allow-Credentials</span>`,
+    impact: '后续添加认证功能时需要修改中间件。'
+  },
+  {
+    id: 23, severity: 'optimization', module: 'frontend',
+    file: 'frontend/src/views/CrawlView.vue', line: 'L56',
+    title: 'spiders 初始值不完整，API 失败时只有一个选项',
+    desc: '<code>spiders</code> 初始值只有 <code>bilibili_hot</code> 一个选项，虽然 <code>onMounted</code> 会从 API 获取完整列表，但如果 API 失败（后端离线），用户只能看到一个爬虫选项。建议初始值包含完整列表（与后端 SPIDERS 配置一致），API 成功后再更新。',
+    code: `const spiders = ref([{ key: 'bilibili_hot', label: 'B站热门' }])  <span class="bug"># 只有一个默认值</span>`,
+    impact: '后端离线时采集管理页只能选择一个爬虫。'
+  },
+  {
+    id: 24, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/tests.py', line: '全文',
+    title: '测试文件为空，缺少单元测试和集成测试',
+    desc: '<code>tests.py</code> 只有默认的 <code>from django.test import TestCase</code>，没有任何实际测试。对于包含搜索、RAG、爬虫管理等核心功能的项目，建议至少添加：API 接口测试（搜索/建议/问答/统计）、VectorStore 单元测试、CrawlManager 状态测试。教学项目也应展示测试写法。',
+    code: `from django.test import TestCase
+
+<span class="comment"># 空文件，无任何测试</span>`,
+    impact: '代码质量无法保障；重构时容易引入回归 bug。'
+  },
+  {
+    id: 25, severity: 'optimization', module: 'ArticleSpider',
+    file: 'ArticleSpider/middlewares.py', line: 'L65-L74',
+    title: 'PlaywrightFallbackMiddleware 移除 download_slot 可能绕过限速',
+    desc: '降级重试时 <code>retry_meta.pop("download_slot", None)</code> 移除了下载槽，注释说"避开失败页面卡住的限速"。但 <code>download_slot</code> 是 Scrapy 按域名限速的核心机制，移除后该请求将不受 <code>DOWNLOAD_DELAY</code> 和 <code>AUTOTHROTTLE</code> 约束，可能导致对目标站发起过快请求。建议保留 download_slot，或仅在特定场景下移除。',
+    code: `retry_meta.pop("download_slot", None)  <span class="comment"># 移除下载槽，可能绕过限速</span>`,
+    impact: '降级重试时可能违反对目标站的礼貌限速。'
+  },
+  {
+    id: 26, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L371-L402',
+    title: 'api_img 图片代理未校验 URL 中的用户名/密码，存在潜在 SSRF 风险',
+    desc: '图片代理已经做了白名单校验（按 "." 边界精确匹配 hostname），也设置了 <code>allow_redirects=False</code> 防止重定向绕过。但没有校验 URL 中的用户名/密码部分（如 <code>http://evil.com@doubanio.com/path</code>）。虽然 <code>requests</code> 会正确解析 hostname 为 <code>doubanio.com</code>，但某些情况下可能造成意外行为。建议加一个用户名/密码为空的检查。',
+    code: `host = (urlparse(url).hostname or "").lower()
+allowed = any(host == h or host.endswith("." + h) for h in _IMG_HOSTS)
+<span class="comment"># 缺少 username/password 检查</span>`,
+    impact: '极低风险的 SSRF 绕过可能性；当前实现已经比较安全。'
+  },
+  {
+    id: 27, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/api_views.py', line: 'L43-L44',
+    title: '模块级 ES 和 Redis 客户端在 import 时创建，服务不可用时无优雅降级',
+    desc: '<code>client = Elasticsearch(ES_URL)</code> 和 <code>redis_cli = redis.StrictRedis(...)</code> 在模块 import 时创建。虽然两者都是懒连接（不会立即连接），但如果服务不可用，每次请求都会尝试连接并超时，影响响应时间。建议在模块级创建但加连接超时配置，或用懒加载单例模式。',
+    code: `client = Elasticsearch(ES_URL)  <span class="comment"># 模块级创建，无超时配置</span>
+redis_cli = redis.StrictRedis(decode_responses=True)  <span class="comment"># 模块级创建</span>`,
+    impact: 'ES/Redis 不可用时每个请求都尝试连接，增加延迟。'
+  },
+  {
+    id: 28, severity: 'optimization', module: 'ArticleSpider',
+    file: 'ArticleSpider/spiders/quotes_ai.py', line: 'L50-L67',
+    title: 'async def start() 依赖 Scrapy 2.13+，requirements 已约束但可加版本检查',
+    desc: '使用了 <code>async def start()</code> 作为起始请求入口，这是 Scrapy 2.13+ 的新特性。requirements.txt 中已经约束 <code>scrapy>=2.13</code>，但如果用户在旧版本环境下运行，会得到不友好的错误。建议在 spider 中加版本检查或在文档中明确说明版本要求。',
+    code: `async def start(self):  <span class="comment"># Scrapy 2.13+ 特性</span>
+    yield scrapy.Request(...)`,
+    impact: '旧版本 Scrapy 下运行错误不友好。'
+  },
+  {
+    id: 29, severity: 'optimization', module: 'LcvSearch',
+    file: 'LcvSearch/search/ai_rag.py', line: 'L109-L146',
+    title: 'rag_answer 缺少流式输出支持，长回答用户等待时间长',
+    desc: '<code>rag_answer</code> 是同步调用，等待 LLM 完整生成回答后才返回。对于较长的回答，用户可能需要等待数秒。建议支持流式输出（SSE 或 WebSocket），逐 token 返回给前端，提升用户体验。DeepSeek API 支持 <code>stream=True</code>。',
+    code: `answer = chat([...])  <span class="comment"># 同步等待完整回答</span>
+return JsonResponse({"answer": answer, ...})`,
+    impact: '长回答时用户体验差，需要等待完整生成。'
+  },
+  {
+    id: 30, severity: 'optimization', module: 'frontend',
+    file: 'frontend/src/api.js', line: 'L43-L52',
+    title: 'renderHighlight 还原逻辑可能误判已转义的原文',
+    desc: '<code>renderHighlight</code> 先整体转义 HTML，再还原 <code>&lt;span class="kw"&gt;</code> 为 <code>&lt;mark&gt;</code>。这是正确的 XSS 防护方式。但如果原文中恰好包含 <code>&lt;span class="kw"&gt;</code> 这样的文本（已经被 ES 高亮处理过），还原逻辑会误判为高亮标签。不过这种情况极罕见，且 ES 高亮会对原文中的标签做转义，实际风险很低。',
+    code: `const escaped = html.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+return escaped
+  .replaceAll('&lt;span class="kw"&gt;', '<mark class="kw">')  <span class="comment"># 还原高亮</span>
+  .replaceAll('&lt;/span&gt;', '</mark>')`,
+    impact: '极罕见的边界情况下高亮还原可能误判。'
+  }
+];
+
+// 渲染问题列表
+function renderIssues(filter = 'all') {
+  const list = document.getElementById('issueList');
+  const filtered = filter === 'all' ? issues : issues.filter(i => i.severity === filter);
+  document.getElementById('issueCount').textContent = filtered.length + ' 项';
+  list.innerHTML = filtered.map(issue => `
+    <div class="issue" data-severity="${issue.severity}">
+      <div class="issue-header" onclick="this.parentElement.classList.toggle('open')">
+        <span class="arrow">▶</span>
+        <span class="severity ${issue.severity}">${issue.severity === 'critical' ? '🔴 严重' : issue.severity === 'medium' ? '🟡 中等' : '🟢 优化'}</span>
+        <span class="issue-title">#${issue.id} ${issue.title}</span>
+        <span class="issue-file">${issue.file}</span>
+      </div>
+      <div class="issue-body">
+        <p><span class="tag">模块</span>${issue.module} &nbsp; <span class="tag">位置</span>${issue.line}</p>
+        <p>${issue.desc}</p>
+        ${issue.code ? `<div class="code-block">${issue.code}</div>` : ''}
+        ${issue.impact ? `<p><b>影响：</b>${issue.impact}</p>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// 筛选按钮
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderIssues(btn.dataset.filter);
+  });
+});
+
+// 初始渲染
+renderIssues();
+
+// ECharts 图表
+const severityChart = echarts.init(document.getElementById('chartSeverity'));
+severityChart.setOption({
+  tooltip: { trigger: 'item', formatter: '{b}: {c} 项 ({d}%)' },
+  legend: { bottom: 0, textStyle: { fontSize: 12 } },
+  series: [{
+    type: 'pie',
+    radius: ['40%', '70%'],
+    center: ['50%', '45%'],
+    avoidLabelOverlap: false,
+    itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+    label: { show: true, formatter: '{b}\n{c}项', fontSize: 12 },
+    data: [
+      { value: 5, name: '🔴 严重 Bug', itemStyle: { color: '#f56c6c' } },
+      { value: 10, name: '🟡 中等 Bug', itemStyle: { color: '#e6a23c' } },
+      { value: 15, name: '🟢 优化建议', itemStyle: { color: '#67c23a' } },
+    ]
+  }]
+});
+
+const moduleChart = echarts.init(document.getElementById('chartModule'));
+const moduleData = [
+  { name: 'ArticleSpider', value: 7 },
+  { name: 'LcvSearch', value: 15 },
+  { name: 'ScrapyRedisTest', value: 4 },
+  { name: 'frontend', value: 3 },
+  { name: '跨模块', value: 1 },
+];
+moduleChart.setOption({
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}: {c} 项' },
+  grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+  xAxis: { type: 'value', max: 16, axisLabel: { fontSize: 11 } },
+  yAxis: { type: 'category', data: moduleData.map(m => m.name).reverse(), axisLabel: { fontSize: 12 } },
+  series: [{
+    type: 'bar',
+    data: moduleData.map(m => ({
+      value: m.value,
+      itemStyle: {
+        color: m.name === 'LcvSearch' ? '#f56c6c' : m.name === 'ArticleSpider' ? '#e6a23c' : '#409eff',
+        borderRadius: [0, 4, 4, 0]
+      }
+    })).reverse(),
+    barWidth: '50%',
+    label: { show: true, position: 'right', fontSize: 12, formatter: '{c}' }
+  }]
+});
+
+window.addEventListener('resize', () => {
+  severityChart.resize();
+  moduleChart.resize();
+});
+</script>
+</body>
+</html>
