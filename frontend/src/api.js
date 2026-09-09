@@ -19,9 +19,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  search: (q, p = 1, source = '') => {
-    let path = `/api/search/?q=${encodeURIComponent(q)}&p=${p}`
+  search: (q, p = 1, source = '', sort = 'relevance', days = '') => {
+    let path = `/api/search/?q=${encodeURIComponent(q)}&p=${p}&sort=${encodeURIComponent(sort)}`
     if (source) path += `&source=${encodeURIComponent(source)}`
+    if (days) path += `&days=${days}`
     return request(path)
   },
   suggest: async (s) => {

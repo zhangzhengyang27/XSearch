@@ -77,6 +77,37 @@ def _record_search_keyword(query):
         pass
 
 
+_HIGHLIGHT = {"pre_tags": ['<span class="kw">'], "post_tags": ["</span>"],
+              "fields": {"title": {}, "content": {}}}
+# 分面聚合：来源分布 + 时间分布（时间桶为累计口径：近30天包含近7天）
+_FACET_AGGS = {
+    "facet_sources": {"terms": {"field": "source", "size": 20}},
+    "facet_days": {"date_range": {"field": "create_date", "ranges": [
+        {"key": "7", "from": "now-7d"},
+        {"key": "30", "from": "now-30d"},
+        {"key": "90", "from": "now-90d"},
+    ]}},
+}
+_SORTS = {"time": [{"create_date": {"order": "desc", "missing": "_last"}}, "_score"],
+          "hot": [{"view_nums": {"order": "desc", "missing": "_last"}}, "_score"]}
+_DAY_VALUES = ("7", "30", "90")
+
+
+def _did_you_mean(query):
+    """短语建议器：0 结果时给出"您是不是要找"的相近查询词。"""
+    try:
+        resp = client.search(index=INDEX, suggest={
+            "text": query,
+            "title_phrase": {"phrase": {"field": "title", "size": 1}},
+        })
+        options = resp["suggest"]["title_phrase"][0].get("options") or []
+        if options:
+            return (options[0].get("text") or "").strip() or None
+    except Exception:
+        pass
+    return None
+
+
 def api_search(request):
     query = request.GET.get("q", "").strip()
     source = request.GET.get("source", "").strip()  # 可选：按来源过滤
@@ -84,26 +115,12 @@ def api_search(request):
         page = max(int(request.GET.get("p", "1")), 1)
     except ValueError:
         page = 1
+    sort_param = request.GET.get("sort", "relevance")   # relevance/time/hot
+    days = request.GET.get("days", "").strip()          # 近 N 天过滤（7/30/90）
     if not query:
         return JsonResponse({"total": 0, "page": 1, "page_nums": 0, "results": []})
     _record_search_keyword(query)
 
-    query_body = {"multi_match": {"query": query,
-                                  "fields": ["title^3", "tags^2", "author", "content"],
-                                  # 超过 2 个词元的查询要求 80% 词元命中，
-                                  # 防止停用词之外的低质单/双词命中刷屏
-                                  "minimum_should_match": "2<80%"}}
-    # 榜单类来源（热门/每周必看）也支持关键词搜索：关键词匹配 + source 过滤，
-    # 不再忽略用户输入的 q（旧实现直接覆盖为 term 查询，导致关键词失效）
-    if source in RANKING_SOURCES:
-        query_body = {"bool": {"must": query_body,
-                                "filter": [{"term": {"source": source}}]}}
-    else:
-        body = {"must": query_body,
-                "must_not": [{"terms": {"source": list(SEARCH_EXCLUDED_SOURCES)}}]}
-        if source:
-            body["filter"] = [{"term": {"source": source}}]
-        query_body = {"bool": body}
     if source in LIVE_SOURCES:
         # 实时联邦搜索：现场调平台接口，结果同时后台写入 ES 累积语料
         try:
@@ -130,38 +147,99 @@ def api_search(request):
                              "by_source": data["by_source"], "errors": data.get("errors", {}),
                              "live": True})
 
+    # ---- ES 库内检索 ----
+    # 活跃维度的筛选（来源/时间）放 post_filter：分面聚合统计不受自身筛选影响，
+    # 每个分面的计数始终是"其他筛选条件下"的分布，供用户直接切换
+    post_filters = []
+    if source:
+        post_filters.append({"term": {"source": source}})
+    if days in _DAY_VALUES:
+        post_filters.append({"range": {"create_date": {"gte": "now-{}d".format(days)}}})
+    sort = _SORTS.get(sort_param)
+
+    def _run_search(match_text, page_num, fuzzy=False):
+        mm = {"query": match_text,
+              "fields": ["title^3", "tags^2", "author", "content"],
+              # 超过 2 个词元的查询要求 80% 词元命中，防止低质命中刷屏
+              "minimum_should_match": "2<80%"}
+        if fuzzy:
+            # 模糊重搜：编辑距离容错（如"猪申克"→"肖申克"），
+            # 并放宽词元命中率让部分错词不拖垮整个查询
+            mm["fuzziness"] = "AUTO"
+            mm["minimum_should_match"] = "2<50%"
+        body = {
+            "index": INDEX,
+            "query": {"bool": {
+                "must": {"multi_match": mm},
+                "must_not": [{"terms": {"source": list(SEARCH_EXCLUDED_SOURCES)}}],
+            }},
+            "from_": (page_num - 1) * PAGE_SIZE,
+            "size": PAGE_SIZE,
+            "highlight": _HIGHLIGHT,
+            "aggs": _FACET_AGGS,
+        }
+        if post_filters:
+            body["post_filter"] = {"bool": {"must": post_filters}}
+        if sort:
+            body["sort"] = sort
+        return client.search(**body)
+
+    def _extract(resp):
+        results = []
+        for hit in resp["hits"]["hits"]:
+            src = hit["_source"]
+            hl = hit.get("highlight") or {}
+            results.append({
+                "title": "".join(hl["title"]) if hl.get("title") else src.get("title", ""),
+                "content": "".join(hl["content"]) if hl.get("content") else (src.get("content") or "")[:200],
+                "url": src.get("url", ""),
+                "author": src.get("author", ""),
+                "source": src.get("source", ""),
+                "rating": src.get("rating"),
+                "rank": src.get("rank"),
+                "front_image_url": src.get("front_image_url", ""),
+                "create_date": (src.get("create_date") or "")[:10],
+                "praise_nums": src.get("praise_nums"),
+                "view_nums": src.get("view_nums"),
+                "reply_nums": src.get("reply_nums"),
+                "danmaku_nums": src.get("danmaku_nums"),
+            })
+        aggs = resp.get("aggregations") or {}
+        facets = {
+            "sources": [{"key": b["key"], "count": b["doc_count"]}
+                        for b in (aggs.get("facet_sources") or {}).get("buckets", [])],
+            "days": [{"key": b["key"], "count": b["doc_count"]}
+                     for b in (aggs.get("facet_days") or {}).get("buckets", [])],
+        }
+        return resp["hits"]["total"]["value"], results, facets
+
     try:
-        resp = client.search(
-            index=INDEX,
-            query=query_body,
-            from_=(page - 1) * PAGE_SIZE,
-            size=PAGE_SIZE,
-            highlight={"pre_tags": ['<span class="kw">'], "post_tags": ["</span>"],
-                       "fields": {"title": {}, "content": {}}},
-        )
+        resp = _run_search(query, page)
     except Exception as e:
         return _es_error(e)
+    total, results, facets = _extract(resp)
 
-    total = resp["hits"]["total"]["value"]
-    results = []
-    for hit in resp["hits"]["hits"]:
-        src = hit["_source"]
-        hl = hit.get("highlight") or {}
-        results.append({
-            "title": "".join(hl["title"]) if hl.get("title") else src.get("title", ""),
-            "content": "".join(hl["content"]) if hl.get("content") else (src.get("content") or "")[:200],
-            "url": src.get("url", ""),
-            "author": src.get("author", ""),
-            "source": src.get("source", ""),
-            "rating": src.get("rating"),
-            "rank": src.get("rank"),
-            "front_image_url": src.get("front_image_url", ""),
-            "create_date": (src.get("create_date") or "")[:10],
-            "praise_nums": src.get("praise_nums"),
-            "view_nums": src.get("view_nums"),
-            "reply_nums": src.get("reply_nums"),
-            "danmaku_nums": src.get("danmaku_nums"),
-        })
+    # 容错纠错（两级）：0 结果时先用短语建议器找相近词重搜；
+    # 仍无结果则用编辑距离模糊匹配重搜（fuzziness AUTO）
+    did_you_mean = None
+    corrected = None
+    fuzzy_match = False
+    if total == 0 and page == 1:
+        did_you_mean = _did_you_mean(query)
+        if did_you_mean and did_you_mean != query:
+            try:
+                total2, results2, facets2 = _extract(_run_search(did_you_mean, 1))
+                if results2:
+                    corrected, total, results, facets = did_you_mean, total2, results2, facets2
+            except Exception:
+                pass
+        if not results:
+            try:
+                total2, results2, facets2 = _extract(_run_search(query, 1, fuzzy=True))
+                if results2:
+                    fuzzy_match, total, results, facets = True, total2, results2, facets2
+            except Exception:
+                pass
 
     # 分页 bug 修复：ES 的 total 偶尔会高于实际命中数（估算偏差），
     # 导致出现空页。如果当前页为空且不是第 1 页，自动回退到最后一页。
@@ -169,30 +247,12 @@ def api_search(request):
         # 向前查找最后一个有数据的页
         for fallback_page in range(page - 1, 0, -1):
             try:
-                resp2 = client.search(
-                    index=INDEX, query=query_body,
-                    from_=(fallback_page - 1) * PAGE_SIZE, size=PAGE_SIZE,
-                    highlight={"pre_tags": ['<span class="kw">'], "post_tags": ["</span>"],
-                               "fields": {"title": {}, "content": {}}},
-                )
+                resp2 = _run_search(query, fallback_page)
             except Exception:
                 continue
             hits2 = resp2["hits"]["hits"]
             if hits2:
-                results = []
-                for hit in hits2:
-                    src = hit["_source"]
-                    hl = hit.get("highlight") or {}
-                    results.append({
-                        "title": "".join(hl["title"]) if hl.get("title") else src.get("title", ""),
-                        "content": "".join(hl["content"]) if hl.get("content") else (src.get("content") or "")[:200],
-                        "url": src.get("url", ""), "author": src.get("author", ""),
-                        "source": src.get("source", ""), "rating": src.get("rating"),
-                        "rank": src.get("rank"), "front_image_url": src.get("front_image_url", ""),
-                        "create_date": (src.get("create_date") or "")[:10],
-                        "praise_nums": src.get("praise_nums"), "view_nums": src.get("view_nums"),
-                        "reply_nums": src.get("reply_nums"), "danmaku_nums": src.get("danmaku_nums"),
-                    })
+                _, results, _ = _extract(resp2)
                 page = fallback_page
                 total = (page - 1) * PAGE_SIZE + len(results)
                 break
@@ -215,6 +275,10 @@ def api_search(request):
         "page": page,
         "page_nums": page_nums,
         "results": results,
+        "facets": facets,
+        "did_you_mean": did_you_mean,
+        "corrected": corrected,
+        "fuzzy": fuzzy_match,
         "suggestions": suggestions,
     })
 

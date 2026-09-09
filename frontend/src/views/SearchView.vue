@@ -29,6 +29,40 @@
       >{{ label }}</div>
     </div>
 
+    <!-- 排序 + 时间筛选（ES 库内检索时展示） -->
+    <div class="filter-bar" v-if="searched && !isLiveTab">
+      <div class="filter-group">
+        <span class="filter-label">排序</span>
+        <el-radio-group v-model="sortBy" size="small" @change="() => doSearch(1)">
+          <el-radio-button value="relevance">相关度</el-radio-button>
+          <el-radio-button value="time">最新</el-radio-button>
+          <el-radio-button value="hot">最热</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">时间</span>
+        <el-check-tag v-for="d in DAY_OPTIONS" :key="d.value" size="small"
+                      :checked="activeDays === d.value"
+                      @change="() => setDays(d.value)">{{ d.label }}</el-check-tag>
+      </div>
+    </div>
+
+    <!-- 来源分面（计数来自当前查询的聚合，点击即筛选） -->
+    <div class="facet-bar" v-if="searched && !isLiveTab && facets.sources.length">
+      <el-tag v-for="f in facets.sources" :key="f.key" effect="plain"
+              :type="source === f.key ? 'primary' : 'info'"
+              class="facet-tag" @click="switchSource(source === f.key ? '' : f.key)">
+        {{ sourceLabel(f.key) }} · {{ f.count }}
+      </el-tag>
+    </div>
+
+    <el-alert v-if="corrected" type="warning" show-icon :closable="true" class="block"
+              @close="corrected = ''"
+              :title="`没有找到与「${lastQuery}」相关的结果，已为你显示「${corrected}」的结果`" />
+    <el-alert v-else-if="fuzzyHit" type="info" show-icon :closable="true" class="block"
+              @close="fuzzyHit = false"
+              :title="`没有与「${lastQuery}」精确匹配的结果，已为你显示相近的结果`" />
+
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="block" />
 
     <div v-if="searched" class="meta">共 <b>{{ total }}</b> 条结果</div>
@@ -140,7 +174,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api, renderHighlight, formatNum, imgUrl } from '../api.js'
 
 const query = ref('')
@@ -154,6 +188,24 @@ const searched = ref(false)
 const error = ref('')
 const suggestions = ref([])
 const hotWords = ref([])
+const sortBy = ref('relevance')
+const activeDays = ref('')
+const facets = ref({ sources: [], days: [] })
+const corrected = ref('')
+const lastQuery = ref('')
+const fuzzyHit = ref(false)
+
+const DAY_OPTIONS = [
+  { value: '', label: '全部' },
+  { value: '7', label: '近7天' },
+  { value: '30', label: '近30天' },
+  { value: '90', label: '近90天' },
+]
+// 实时 Tab（B站视频/网易云/掘金/全网聚合）不支持排序/分面参数
+const LIVE_TABS = new Set(['all', 'bilibili_video', 'netease_music', 'juejin_article'])
+const isLiveTab = computed(() => LIVE_TABS.has(source.value))
+
+const sourceLabel = (s) => SOURCE_NAMES[s] || s
 
 const SOURCE_NAMES = {
   all: '全网搜索(实时)',
@@ -216,7 +268,7 @@ async function doSearch(p = 1) {
   error.value = ''
   suggestions.value = []
   try {
-    const data = await api.search(query.value, p, source.value)
+    const data = await api.search(query.value, p, source.value, sortBy.value, activeDays.value)
     // 分页 bug 修复：如果当前页返回 0 条结果且不是第 1 页，
     // 说明 ES 的 total 估算偏高导致出现空页，自动回退到第 1 页
     if (p > 1 && (!data.results || data.results.length === 0)) {
@@ -228,6 +280,10 @@ async function doSearch(p = 1) {
     total.value = data.total
     page.value = data.page
     hotWords.value = data.suggestions || []
+    facets.value = data.facets || { sources: [], days: [] }
+    corrected.value = data.corrected || ''
+    fuzzyHit.value = !!data.fuzzy && !data.corrected
+    lastQuery.value = query.value
     // 分页 bug 修复：如果当前页结果数少于 PAGE_SIZE 且不是第 1 页，
     // 说明这是实际最后一页，修正 pageNums 避免出现空页
     if (p > 1 && data.results && data.results.length < PAGE_SIZE) {
@@ -246,6 +302,11 @@ async function doSearch(p = 1) {
 function pick(s) {
   query.value = s
   doSearch(1)
+}
+
+function setDays(v) {
+  activeDays.value = activeDays.value === v ? '' : v
+  if (searched.value) doSearch(1)
 }
 </script>
 
@@ -307,6 +368,16 @@ function pick(s) {
 .alt-suggest { margin-top: 4px; }
 .alt-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 10px; }
 .alt-tag { margin: 0 8px 8px 0; }
+
+/* 排序/时间筛选栏与来源分面 */
+.filter-bar {
+  display: flex; gap: 24px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.filter-group { display: flex; align-items: center; gap: 8px; }
+.filter-label { font-size: 12px; color: var(--el-text-color-secondary); }
+.facet-bar { margin-bottom: 12px; }
+.facet-tag { cursor: pointer; margin: 0 8px 6px 0; }
 
 /* 来源 Tab 切换 */
 .source-tabs {

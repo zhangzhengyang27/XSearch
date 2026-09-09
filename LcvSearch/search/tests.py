@@ -43,7 +43,7 @@ class ApiSearchTests(TestCase):
         self.assertEqual(data['page'], 1)
 
     def test_ranking_source_includes_keyword(self):
-        """榜单来源搜索时应同时匹配关键词（修复后不再忽略 q）。"""
+        """榜单来源搜索时同样执行关键词 multi_match（source 走 post_filter）。"""
         request = self.factory.get('/api/search/',
                                    {'q': '测试视频', 'source': 'bilibili_hot'})
         with patch('search.api_views.client') as mock_client:
@@ -51,12 +51,17 @@ class ApiSearchTests(TestCase):
                 'hits': {'total': {'value': 0}, 'hits': []}
             }
             api_search(request)
-            # 验证传给 ES 的 query 包含 bool.must（关键词）而非纯 term
-            call_kwargs = mock_client.search.call_args[1]
+            # 第一次调用是主检索；0 结果后还会触发纠错 suggest（最后一次调用），
+            # 因此断言取 call_args_list[0]
+            call_kwargs = mock_client.search.call_args_list[0][1]
             query = call_kwargs['query']
             self.assertIn('bool', query)
             self.assertIn('must', query['bool'])
             self.assertIn('multi_match', query['bool']['must'])
+            # 来源过滤走 post_filter（保证分面计数不受自身筛选影响）
+            post = call_kwargs.get('post_filter')
+            self.assertTrue(post)
+            self.assertEqual(post['bool']['must'][0]['term']['source'], 'bilibili_hot')
 
 
 class ApiSuggestTests(TestCase):
