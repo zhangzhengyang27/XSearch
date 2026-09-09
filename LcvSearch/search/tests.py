@@ -10,9 +10,9 @@ LcvSearch 基础单元测试。
 import json
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory
+from django.test import SimpleTestCase, TestCase, RequestFactory
 
-from search.api_views import api_search, api_suggest, api_stats
+from search.api_views import api_rankings, api_search, api_suggest, api_stats
 
 
 class ApiSearchTests(TestCase):
@@ -150,3 +150,97 @@ class CorsMiddlewareTests(TestCase):
         response = middleware(request)
         self.assertFalse(called['view'])  # 视图未被调用
         self.assertEqual(response.status_code, 200)
+
+
+class ApiRankingsTests(TestCase):
+    """榜单/新闻列表接口测试。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_news_source_uses_terms_and_date_sort(self):
+        """source=news 应走 terms 多源过滤 + 发布时间倒序 + 分页。"""
+        request = self.factory.get('/api/rankings/', {'source': 'news'})
+        with patch('search.api_views.client') as mock_client, \
+                patch('search.api_views.redis_cli'):
+            mock_client.search.return_value = {
+                'hits': {'total': {'value': 0}, 'hits': []}}
+            response = api_rankings(request)
+            kwargs = mock_client.search.call_args[1]
+            self.assertIn('terms', kwargs['query'])
+            self.assertEqual(kwargs['sort'],
+                             [{'create_date': {'order': 'desc', 'missing': '_last'}}])
+            self.assertEqual(kwargs['from_'], 0)
+            self.assertEqual(kwargs['size'], 20)
+        data = json.loads(response.content)
+        self.assertEqual(data['page'], 1)
+        self.assertEqual(data['page_nums'], 0)
+
+    def test_news_cache_hit_skips_es(self):
+        """Redis 缓存命中时不查询 ES。"""
+        request = self.factory.get('/api/rankings/', {'source': 'news'})
+        cached = json.dumps({'source': 'news', 'total': 5, 'page': 1,
+                             'page_nums': 1, 'items': [{'title': 'x'}]},
+                            ensure_ascii=False)
+        with patch('search.api_views.client') as mock_client, \
+                patch('search.api_views.redis_cli') as mock_redis:
+            mock_redis.get.return_value = cached
+            response = api_rankings(request)
+            mock_client.search.assert_not_called()
+        data = json.loads(response.content)
+        self.assertEqual(data['total'], 5)
+
+    def test_ranking_source_keeps_rank_sort(self):
+        """榜单来源仍按 rank 升序的 term 查询。"""
+        request = self.factory.get('/api/rankings/', {'source': 'douban_movie'})
+        with patch('search.api_views.client') as mock_client, \
+                patch('search.api_views.redis_cli'):
+            mock_client.search.return_value = {
+                'hits': {'total': {'value': 0}, 'hits': []}}
+            api_rankings(request)
+            kwargs = mock_client.search.call_args[1]
+            self.assertEqual(kwargs['query'], {'term': {'source': 'douban_movie'}})
+            self.assertEqual(kwargs['sort'], [{'rank': 'asc'}])
+
+    def test_invalid_source_returns_400(self):
+        request = self.factory.get('/api/rankings/', {'source': 'evil'})
+        response = api_rankings(request)
+        self.assertEqual(response.status_code, 400)
+
+
+class CronValidationTests(SimpleTestCase):
+    """定时任务 cron 表达式三级校验。"""
+
+    def test_valid_expressions(self):
+        from search.crawl_manager import ScheduleManager
+        self.assertIsNone(ScheduleManager._validate_cron('0 8 * * *'))
+        self.assertIsNone(ScheduleManager._validate_cron('*/30 * * * *'))
+
+    def test_wrong_segment_count(self):
+        from search.crawl_manager import ScheduleManager
+        self.assertIn('5 段', ScheduleManager._validate_cron('0 8 * *'))
+
+    def test_illegal_characters(self):
+        from search.crawl_manager import ScheduleManager
+        self.assertIn('非法字符', ScheduleManager._validate_cron('abc def ghi jkl mno'))
+
+    def test_out_of_range_value(self):
+        from search.crawl_manager import ScheduleManager
+        self.assertIn('不合法', ScheduleManager._validate_cron('0 25 * * *'))
+
+
+class NewsRssStripHtmlTests(SimpleTestCase):
+    """新闻爬虫正文清洗：播放器脚本不得混入正文。"""
+
+    def test_script_block_removed(self):
+        from crawler.spiders.news_rss import strip_html
+        raw = '<p>正文第一段</p><script>showPlayer({src: "x.mp4"})</script><p>第二段</p>'
+        self.assertEqual(strip_html(raw), '正文第一段第二段')
+
+    def test_unclosed_script_tag_removed(self):
+        from crawler.spiders.news_rss import strip_html
+        self.assertEqual(strip_html('<p>正文</p><script src="//x/y.js">'), '正文')
+
+    def test_entities_unescaped(self):
+        from crawler.spiders.news_rss import strip_html
+        self.assertEqual(strip_html('A&amp;B &lt;tag&gt;'), 'A&B <tag>')

@@ -156,6 +156,7 @@ scrapy crawl douyin_hot
 | `bilibili_comments` | B站 | 视频评论（reply/main 游标翻页；配 BILI_COOKIE 抓全量） |
 | `douban_top250` | 豆瓣 | 电影 / 图书 Top250（评分/金句/排名入 ES） |
 | `news_rss` | 人民网 / 中新网 / IT之家 / Solidot | 新闻 RSS 聚合（官方源合规抓取，中新网自动跟进文章页抓正文；`-a sources=` 可选源） |
+| `aihot_hot` | AIHOT（aihot.news） | AI 热点榜 Top10（官方 v1 API，事件 AI 综述入 ES，榜单自动清理跌出项） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
 
 ## API 接口
@@ -165,7 +166,7 @@ scrapy crawl douyin_hot
 | `/api/search/` | GET | 关键词搜索（支持 source 筛选、分页） |
 | `/api/suggest/` | GET | 搜索建议 |
 | `/api/stats/` | GET | 数据概览统计 |
-| `/api/rankings/` | GET | 榜单数据（5 个来源） |
+| `/api/rankings/` | GET | 榜单/新闻列表数据（榜单 5 个来源 + 新闻 5 路） |
 | `/api/crawl/start/` | POST | 启动爬虫 |
 | `/api/crawl/status/` | GET | 爬虫运行状态 |
 | `/api/crawl/history/` | GET | 爬虫历史记录 |
@@ -222,6 +223,15 @@ python manage.py test search --verbosity=2
 ```
 
 9 个单元测试覆盖：API 参数校验、CORS 中间件、ES 异常降级等。
+
+## 发布清单（公网部署前）
+
+- [ ] `cp .env.example .env`：设置 `DJANGO_DEBUG=False`、`DJANGO_ALLOWED_HOSTS`、随机 `DJANGO_SECRET_KEY`，按需填 `AI_LLM_API_KEY`
+- [ ] 公网部署务必设置 `API_TOKEN`（保护爬虫触发 / 定时任务 / 评论抓取接口），前端构建时注入 `VITE_API_TOKEN` 自动携带
+- [ ] Elasticsearch 仅监听内网：compose 内 `xpack.security.enabled=false`，切勿把 9200 暴露到公网
+- [ ] 依赖用 `requirements-lock.txt` 安装（Dockerfile 默认），保证构建可复现
+- [ ] `python manage.py test search` 全绿后再发布
+- [ ] 定时任务随服务自启（无需访问页面激活）；部署后到「采集管理」页确认各任务"下次运行"时间正确
 
 ## 许可证
 

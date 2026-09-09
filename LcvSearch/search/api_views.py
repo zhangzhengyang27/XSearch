@@ -36,7 +36,8 @@ ES_URL = settings.ES_URL
 INDEX = settings.ES_INDEX
 # 不参与关键词搜索的来源：榜单类走 /api/rankings，评论按视频查看
 # （/api/comments），演示站是教学数据（quotes.toscrape.com 练习站）
-RANKING_SOURCES = ("douyin_hot", "bilibili_hot", "bilibili_weekly", "douban_movie", "douban_book")
+RANKING_SOURCES = ("douyin_hot", "bilibili_hot", "bilibili_weekly", "douban_movie", "douban_book",
+                   "aihot_hot")
 SEARCH_EXCLUDED_SOURCES = RANKING_SOURCES + ("bilibili_comments", "quotes_ai")
 COMMENT_FETCH_TIMEOUT = 180   # 按需抓取单次子进程上限（秒）
 PAGE_SIZE = 10
@@ -200,11 +201,21 @@ def api_search(request):
     if page > 1 and len(results) < PAGE_SIZE:
         page_nums = page
 
+    # 空结果兜底：附上全站热搜词，前端展示"换个词试试"引导
+    suggestions = []
+    if not results:
+        try:
+            suggestions = redis_cli.zrevrangebyscore(
+                "search_keywords_set", "+inf", "-inf", start=0, num=6)
+        except Exception:
+            pass
+
     return JsonResponse({
         "total": total,
         "page": page,
         "page_nums": page_nums,
         "results": results,
+        "suggestions": suggestions,
     })
 
 
@@ -297,6 +308,14 @@ def api_rankings(request):
 
     if source == "news" or source in NEWS_SOURCES:
         page_size = 20
+        # 新闻列表 60 秒缓存：页面轮询/翻页密集，且语料分钟级变化足够
+        cache_key = "rankings_news:{}:p{}".format(source, page)
+        try:
+            raw = redis_cli.get(cache_key)
+            if raw:
+                return JsonResponse(json.loads(raw))
+        except Exception:
+            pass
         query = ({"terms": {"source": list(NEWS_SOURCES)}} if source == "news"
                  else {"term": {"source": source}})
         try:
@@ -310,12 +329,16 @@ def api_rankings(request):
         except Exception as e:
             return _es_error(e)
         total = resp["hits"]["total"]["value"]
-        items = [_list_item(h["_source"]) for h in resp["hits"]["hits"]]
-        return JsonResponse({
+        payload = {
             "source": source, "total": total, "page": page,
             "page_nums": math.ceil(total / page_size) if total else 0,
-            "items": items,
-        })
+            "items": [_list_item(h["_source"]) for h in resp["hits"]["hits"]],
+        }
+        try:
+            redis_cli.setex(cache_key, 60, json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass
+        return JsonResponse(payload)
 
     try:
         resp = client.search(
@@ -530,6 +553,25 @@ _IMG_REFERER = {"doubanio.com": "https://movie.douban.com/",
 # 图片本地缓存目录：豆瓣 Top250 等基本不变的图片缓存到磁盘，避免每次请求都回源
 _IMG_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache", "images")
 _IMG_CACHE_MAX_AGE = 30 * 24 * 3600  # 缓存 30 天
+_IMG_CACHE_MAX_FILES = 2000          # 文件数上限，超出按 mtime 淘汰最旧的一半
+
+
+def _img_cache_cleanup():
+    """图片缓存超过文件数上限时淘汰最旧的一半，防止磁盘无限增长。"""
+    try:
+        files = [os.path.join(_IMG_CACHE_DIR, f) for f in os.listdir(_IMG_CACHE_DIR)]
+        files = [f for f in files if os.path.isfile(f)]
+        if len(files) <= _IMG_CACHE_MAX_FILES:
+            return
+        files.sort(key=os.path.getmtime)
+        for f in files[:len(files) // 2]:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        logger.info("图片缓存淘汰完成，剩余约 %d 个文件", _IMG_CACHE_MAX_FILES // 2)
+    except Exception:
+        pass
 
 
 def _img_cache_path(url):
@@ -604,6 +646,11 @@ def api_img(request):
                 pass
     finally:
         upstream.close()
+
+    # 低频触发缓存容量清理（1% 的回源请求），摊薄目录扫描成本
+    import random
+    if random.random() < 0.01:
+        _img_cache_cleanup()
 
     # 返回缓存文件（此时已写入磁盘）
     if os.path.exists(cache_path):

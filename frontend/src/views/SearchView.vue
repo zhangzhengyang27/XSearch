@@ -33,7 +33,13 @@
 
     <div v-if="searched" class="meta">共 <b>{{ total }}</b> 条结果</div>
 
-    <el-empty v-if="searched && !loading && !results.length" description="没有找到相关内容" />
+    <el-empty v-if="searched && !loading && !results.length" description="没有找到相关内容">
+      <div v-if="hotWords.length" class="alt-suggest">
+        <div class="alt-tip">大家都在搜</div>
+        <el-tag v-for="s in hotWords" :key="s" class="alt-tag" effect="plain"
+                style="cursor: pointer" @click="pick(s)">{{ s }}</el-tag>
+      </div>
+    </el-empty>
 
     <!-- 豆瓣电影 / 图书：海报卡 -->
     <article v-for="(r, i) in results" :key="i">
@@ -147,6 +153,7 @@ const loading = ref(false)
 const searched = ref(false)
 const error = ref('')
 const suggestions = ref([])
+const hotWords = ref([])
 
 const SOURCE_NAMES = {
   all: '全网搜索(实时)',
@@ -220,6 +227,7 @@ async function doSearch(p = 1) {
     results.value = data.results
     total.value = data.total
     page.value = data.page
+    hotWords.value = data.suggestions || []
     // 分页 bug 修复：如果当前页结果数少于 PAGE_SIZE 且不是第 1 页，
     // 说明这是实际最后一页，修正 pageNums 避免出现空页
     if (p > 1 && data.results && data.results.length < PAGE_SIZE) {
@@ -296,6 +304,9 @@ function pick(s) {
   padding: 10px 14px; font-size: 14px; line-height: 1.7;
 }
 .pager { display: flex; justify-content: center; margin-top: 20px; }
+.alt-suggest { margin-top: 4px; }
+.alt-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 10px; }
+.alt-tag { margin: 0 8px 8px 0; }
 
 /* 来源 Tab 切换 */
 .source-tabs {

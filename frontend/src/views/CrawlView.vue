@@ -197,6 +197,7 @@ const spiders = ref([
   { key: 'douban_movie', label: '豆瓣电影Top250', needs_bvid: false },
   { key: 'douban_book', label: '豆瓣图书Top250', needs_bvid: false },
   { key: 'news_rss', label: '新闻RSS(4源)', needs_bvid: false },
+  { key: 'aihot_hot', label: 'AI热点榜(AIHOT)', needs_bvid: false },
   { key: 'quotes_ai', label: '演示站(教学)', needs_bvid: false },
 ])
 const bvid = ref('')

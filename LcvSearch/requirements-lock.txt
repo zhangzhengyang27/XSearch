@@ -1,0 +1,27 @@
+# LcvSearch 锁定版本：2026-09-09 于 Python 3.12 实测通过的组合
+# 直接依赖精确锁定，传递依赖由 pip 按此约束解析。
+# Dockerfile 默认安装本文件；本地开发可继续用 requirements.txt 的宽松范围。
+# 注意：不要把共享解释器的完整 pip freeze 直接搬进来（会带入无关包）。
+
+# ---- Django 后端 ----
+Django==6.1.1
+elasticsearch-dsl==8.18.0
+elasticsearch==8.19.3
+redis==5.2.1
+requests==2.32.3
+
+# ---- Scrapy 爬虫 ----
+scrapy==2.18.0
+scrapy-playwright==0.0.48
+playwright==1.60.0
+lxml==5.3.0
+Twisted==26.4.0
+APScheduler==3.11.2
+# 本机未安装（指纹中间件有内置降级模板），Docker 安装最新版即可
+browserforge
+
+# ---- 生产部署 ----
+gunicorn==23.0.0
+
+# ---- 开发/测试 ----
+pytest==9.0.3

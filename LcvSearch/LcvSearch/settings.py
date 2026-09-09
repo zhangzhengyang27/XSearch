@@ -179,3 +179,21 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 # 设置后写操作接口（爬虫启动/定时任务/评论抓取）与 AI 问答接口要求请求头
 # X-API-Token 匹配；留空表示不启用（本机开发态默认开放）
 API_TOKEN = os.getenv("API_TOKEN", "")
+
+# ---------- 日志 ----------
+# 让 search 应用的 INFO 日志（调度器启动/任务清理等）输出到控制台；
+# 默认配置下非 django logger 的 INFO 会被丢弃，重启后看不到调度器启动记录
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {"format": "[{asctime}] {levelname} {name}: {message}",
+                   "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "simple"},
+    },
+    "loggers": {
+        "search": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}

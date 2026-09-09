@@ -2,6 +2,7 @@
   <div>
     <div class="toolbar">
       <el-tabs v-model="tab" @tab-change="load">
+        <el-tab-pane label="AI 热点榜" name="aihot_hot" />
         <el-tab-pane label="抖音热点榜" name="douyin_hot" />
         <el-tab-pane label="B站热门" name="bilibili_hot" />
         <el-tab-pane label="B站每周必看" name="bilibili_weekly" />
@@ -31,7 +32,8 @@
         <div class="meta">
           <span v-if="it.rating != null">⭐ {{ it.rating }}</span>
           <span>👤 {{ it.author }}</span>
-          <span v-if="tab === 'douyin_hot' && it.view_nums != null">🔥 {{ formatNum(it.view_nums) }} 热度</span>
+          <span v-if="tab === 'aihot_hot' && it.view_nums != null">🔗 {{ it.view_nums }} 信源印证</span>
+          <span v-else-if="tab === 'douyin_hot' && it.view_nums != null">🔥 {{ formatNum(it.view_nums) }} 热度</span>
           <span v-else-if="it.view_nums != null">▶ {{ formatNum(it.view_nums) }}</span>
           <span v-if="it.praise_nums != null">👍 {{ formatNum(it.praise_nums) }}</span>
           <span v-if="it.danmaku_nums != null">💬 {{ formatNum(it.danmaku_nums) }} 弹幕</span>
@@ -115,6 +117,7 @@ let pollTimer = null
 
 const CRAWL_SPIDER = {
   douyin_hot: 'douyin_hot',
+  aihot_hot: 'aihot_hot',
   bilibili_hot: 'bilibili_hot',
   bilibili_weekly: 'bilibili_weekly',
   douban_movie: 'douban_movie',
@@ -129,6 +132,7 @@ async function load() {
     const d = await api.rankings(tab.value)
     items.value = d.items
     if (tab.value === 'bilibili_weekly' && d.total) hint.value = '每周必看为多期合集，同一视频可能出现在多期榜单中'
+    else if (tab.value === 'aihot_hot' && d.total) hint.value = 'AI 热点榜来自 AIHOT 聚合的 48 小时多信源印证事件（aihot.news），点击「更新榜单数据」采集最新'
     else if (tab.value === 'douyin_hot' && d.total) hint.value = '抖音热点榜实时更新，点击「更新榜单数据」采集最新热点'
     else if (tab.value.startsWith('douban') && d.total) hint.value = '豆瓣 Top250 按评分排序，点击「更新榜单数据」可重新采集'
   } catch (e) {

@@ -34,9 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Python 依赖
-COPY LcvSearch/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装 Python 依赖（锁定版本，保证构建可复现）
+COPY LcvSearch/requirements.txt LcvSearch/requirements-lock.txt ./
+RUN pip install --no-cache-dir -r requirements-lock.txt
 
 # 安装 Playwright 浏览器
 RUN playwright install chromium

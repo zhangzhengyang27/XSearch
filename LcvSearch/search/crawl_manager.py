@@ -7,14 +7,18 @@
     - stdout/stderr 落盘到 logs/，状态接口返回运行标志 + 日志尾部
     - 本机 demo 方案；多任务/排队/分布式时升级 Scrapyd（见前后端分离调研报告）
 """
+import json
+import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
-import json
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 爬虫已合并入 LcvSearch 项目，scrapy.cfg 位于项目根目录（LcvSearch/）
@@ -30,6 +34,7 @@ MAX_HISTORY = 200  # 最多保留 200 条历史记录
 # needs 标记该爬虫必填的参数（从前端透传）
 SPIDERS = {
     "douyin_hot":         {"scrapy_name": "douyin_hot", "label": "抖音热点榜"},
+    "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
     "bilibili_hot":       {"scrapy_name": "bilibili_hot", "label": "B站热门"},
     "bilibili_weekly":    {"scrapy_name": "bilibili_weekly", "label": "B站每周必看"},
     "bilibili_comments":  {"scrapy_name": "bilibili_comments", "label": "B站评论",
@@ -106,8 +111,22 @@ class CrawlManager(object):
                     self._record_history(self._current_job_id, self._spider_key, status,
                                          ended_at=ended_at, returncode=returncode,
                                          items=items)
+                # 成功跑完的任务不需要 JOBDIR 断点状态，删掉防 jobs/ 无限累积；
+                # 失败/被中断的保留，供 /api/crawl/resumable 恢复
+                if returncode == 0:
+                    self._cleanup_job_dir(getattr(self, "_current_job_dir", None))
                 self._proc = None
                 self._current_job_id = None
+
+    @staticmethod
+    def _cleanup_job_dir(job_dir):
+        if not job_dir or not os.path.isdir(job_dir):
+            return
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            logger.info("已清理完成任务目录 %s", os.path.basename(job_dir))
+        except Exception as e:
+            logger.warning("清理任务目录失败: %s", e)
 
     @staticmethod
     def _extract_item_count(log_path):
@@ -154,6 +173,7 @@ class CrawlManager(object):
                     return {"started": False, "reason": "找不到要恢复的任务: {}".format(resume_job)}
             else:
                 job_dir = os.path.join(JOBS_DIR, "{}_{}".format(spider, int(time.time())))
+            self._current_job_dir = job_dir
 
             cmd = [sys.executable, "-m", "scrapy", "crawl", spec["scrapy_name"]]
             cmd += spec.get("extra_args", [])
@@ -467,6 +487,18 @@ class ScheduleManager(object):
             jobs.append(item)
         return {"jobs": jobs, "history": self._history[-10:],
                 "scheduler_active": scheduler is not None}
+
+    def start_scheduler(self):
+        """服务进程启动时恢复定时任务（search/apps.py ready 调用），幂等。
+
+        由此保证重启后 cron 立即生效，不依赖有人先打开采集管理页。
+        """
+        scheduler = self._get_scheduler()
+        if scheduler is None:
+            logger.warning("APScheduler 未安装，定时任务不会自动触发")
+            return
+        enabled = sum(1 for j in self._jobs.values() if j.get("enabled", True))
+        logger.info("定时调度器已启动，恢复 %d/%d 个启用任务", enabled, len(self._jobs))
 
     def shutdown(self):
         """关闭调度器（Django 退出时调用）。"""
