@@ -154,6 +154,7 @@ scrapy crawl douyin_hot
 | `bilibili_weekly` | B站 | 「每周必看」官方 series 接口 |
 | `bilibili_comments` | B站 | 视频评论（reply/main 游标翻页；配 BILI_COOKIE 抓全量） |
 | `douban_top250` | 豆瓣 | 电影 / 图书 Top250（评分/金句/排名入 ES） |
+| `news_rss` | 人民网 / 中新网 / IT之家 / Solidot | 新闻 RSS 聚合（官方源合规抓取，中新网自动跟进文章页抓正文；`-a sources=` 可选源） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
 
 ## API 接口

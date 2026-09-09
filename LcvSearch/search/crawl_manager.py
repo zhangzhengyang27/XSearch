@@ -38,6 +38,7 @@ SPIDERS = {
                            "extra_args": ["-a", "kind=movie"]},
     "douban_book":        {"scrapy_name": "douban_top250", "label": "豆瓣图书Top250",
                            "extra_args": ["-a", "kind=book"]},
+    "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
     "quotes_ai":          {"scrapy_name": "quotes_ai", "label": "演示站(教学)"},
 }
 

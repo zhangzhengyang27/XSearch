@@ -56,6 +56,8 @@ const SOURCE_NAMES = {
   bilibili_hot: 'B站热门', bilibili_weekly: 'B站每周必看', bilibili_comments: 'B站评论',
   douban_movie: '豆瓣电影', douban_book: '豆瓣图书',
   bilibili_video: 'B站搜索', netease_music: '网易云音乐', juejin_article: '掘金文章',
+  news_people: '人民网', news_chinanews: '中新网',
+  news_ithome: 'IT之家', news_solidot: 'Solidot',
   quotes_ai: '演示站',
 }
 const sourceName = (s) => SOURCE_NAMES[s] || s

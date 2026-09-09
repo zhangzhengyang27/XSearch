@@ -112,10 +112,12 @@
         <div class="card-meta"><span v-if="r.author">✍ {{ r.author }}</span></div>
       </div>
 
-      <!-- 通用（演示站等） -->
+      <!-- 通用（新闻/演示站等） -->
       <div v-else class="card generic-card">
         <a :href="r.url" target="_blank" rel="noopener" class="card-title">
           <span v-html="renderHighlight(r.title)"></span>
+          <el-tag v-if="r.source && r.source.startsWith('news_')" size="small"
+                  effect="plain" type="primary" class="src-tag">{{ kindLabel(r) }}</el-tag>
         </a>
         <p class="card-content" v-html="renderHighlight(r.content)"></p>
         <div class="card-meta"><span v-if="r.author">👤 {{ r.author }}</span></div>
@@ -150,6 +152,8 @@ const SOURCE_NAMES = {
   all: '全网搜索(实时)',
   douban_movie: '豆瓣电影', douban_book: '豆瓣图书',
   bilibili_video: 'B站视频', juejin_article: '掘金文章',
+  news_people: '人民网', news_chinanews: '中新网',
+  news_ithome: 'IT之家', news_solidot: 'Solidot',
 }
 // Tab 切换的来源列表（"全部"为空字符串走 ES 库内检索；"全网"为 all 走实时聚合）
 const TAB_SOURCES = {

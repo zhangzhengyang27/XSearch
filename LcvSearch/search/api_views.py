@@ -274,7 +274,8 @@ def api_stats(request):
             index=INDEX,
             query={"match_all": {}},
             size=0,
-            aggs={"by_source": {"terms": {"field": "source", "size": 10}}},
+            # 来源已超过 10 个（新闻源加入后共 14+），聚合 size 放宽
+            aggs={"by_source": {"terms": {"field": "source", "size": 20}}},
         )
         data["total"] = resp["hits"]["total"]["value"]
         data["by_source"] = [{"key": b["key"], "count": b["doc_count"]}
