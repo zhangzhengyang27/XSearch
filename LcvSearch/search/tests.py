@@ -45,7 +45,7 @@ class ApiSearchTests(TestCase):
     def test_ranking_source_includes_keyword(self):
         """榜单来源搜索时同样执行关键词 multi_match（source 走 post_filter）。"""
         request = self.factory.get('/api/search/',
-                                   {'q': '测试视频', 'source': 'bilibili_hot'})
+                                   {'q': '测试视频', 'source': 'douyin_hot'})
         with patch('search.api_views.client') as mock_client:
             mock_client.search.return_value = {
                 'hits': {'total': {'value': 0}, 'hits': []}
@@ -61,7 +61,7 @@ class ApiSearchTests(TestCase):
             # 来源过滤走 post_filter（保证分面计数不受自身筛选影响）
             post = call_kwargs.get('post_filter')
             self.assertTrue(post)
-            self.assertEqual(post['bool']['must'][0]['term']['source'], 'bilibili_hot')
+            self.assertEqual(post['bool']['must'][0]['term']['source'], 'douyin_hot')
 
 
 class ApiSuggestTests(TestCase):
@@ -197,14 +197,14 @@ class ApiRankingsTests(TestCase):
 
     def test_ranking_source_keeps_rank_sort(self):
         """榜单来源仍按 rank 升序的 term 查询。"""
-        request = self.factory.get('/api/rankings/', {'source': 'douban_movie'})
+        request = self.factory.get('/api/rankings/', {'source': 'douyin_hot'})
         with patch('search.api_views.client') as mock_client, \
                 patch('search.api_views.redis_cli'):
             mock_client.search.return_value = {
                 'hits': {'total': {'value': 0}, 'hits': []}}
             api_rankings(request)
             kwargs = mock_client.search.call_args[1]
-            self.assertEqual(kwargs['query'], {'term': {'source': 'douban_movie'}})
+            self.assertEqual(kwargs['query'], {'term': {'source': 'douyin_hot'}})
             self.assertEqual(kwargs['sort'], [{'rank': 'asc'}])
 
     def test_invalid_source_returns_400(self):

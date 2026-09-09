@@ -2,7 +2,7 @@
 """
 把爬取结果写入 Elasticsearch（默认开启）。
 
-数据流：quotes_ai / bilibili_hot 爬虫 -> 本管道 -> ES "quotes" 索引
+数据流：news_rss / aihot_hot 等爬虫 -> 本管道 -> ES "quotes" 索引
         -> LcvSearch 关键词搜索（/search/）等 API 复用
 
 启动时探测 ES：不可用则告警并跳过入库，不影响爬虫运行（大规模生产建议改批量写入）。

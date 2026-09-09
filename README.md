@@ -16,9 +16,9 @@
 ## 功能特性
 
 ### 🔍 搜索
-- 多源 Tab 切换（B站视频 / 豆瓣电影 / 豆瓣图书 / 掘金文章 / 网易云音乐 / 全网实时聚合）
-- 搜索建议（ES completion）
-- 分页 + 空页自动回退
+- 多源 Tab 切换（新闻 / 网易云音乐 / 掘金文章 / 全网实时聚合）
+- 搜索建议（ES completion）、容错纠错、排序切换、分面过滤
+- 分页 + 空页自动回退、空结果热搜词引导
 - 搜索结果 Redis 缓存 + 热搜词统计
 
 ### 🕷️ 爬虫管理
@@ -29,10 +29,9 @@
 - 采集统计图表
 
 ### 📊 榜单
+- AI 热点榜（AIHOT 官方 API，事件 AI 综述）
 - 抖音热点榜（50 条，实时）
-- B站热门 / 每周必看
-- 豆瓣电影 Top250 / 豆瓣图书 Top250
-- 图片本地磁盘缓存（快 70 倍）
+- 新闻列表（人民网 / 中新网 / IT之家 / Solidot，RSS 定时增量）
 
 ## 项目结构
 
@@ -43,10 +42,10 @@ coding-92/
 │   ├── search/                   # 搜索 + 爬虫管理 API
 │   │   ├── api_views.py          # 全部 API 接口
 │   │   ├── crawl_manager.py      # 爬虫进程管理 + 定时任务
-│   │   ├── live_sources.py       # 实时搜索源（B站/掘金）
+│   │   ├── live_sources.py       # 实时搜索源（网易云音乐/掘金）
 │   │   └── models.py             # Django 模型
 │   ├── crawler/                  # Scrapy 爬虫（原 ArticleSpider，已合并）
-│   │   ├── spiders/              # 7 个爬虫
+│   │   ├── spiders/              # 4 个爬虫
 │   │   ├── ai/                   # LLM 自愈抽取 + VLM 验证码
 │   │   ├── tools/                # 工具脚本（知乎登录等）
 │   │   ├── middlewares.py        # 指纹伪装 + 代理 + Playwright 降级
@@ -128,20 +127,17 @@ npm run dev
 ```bash
 cd LcvSearch
 
-# 采集演示站数据（10条）
-scrapy crawl quotes_ai -a pages=1
+# 采集新闻（人民网/中新网/IT之家/Solidot，4 源）
+scrapy crawl news_rss
 
-# 采集 B站热门
-scrapy crawl bilibili_hot
-
-# 采集豆瓣电影 Top250
-scrapy crawl douban_top250 -a kind=movie
-
-# 采集豆瓣图书 Top250
-scrapy crawl douban_top250 -a kind=book
+# 采集 AI 热点榜
+scrapy crawl aihot_hot
 
 # 采集抖音热点榜
 scrapy crawl douyin_hot
+
+# 采集演示站数据（10条）
+scrapy crawl quotes_ai -a pages=1
 ```
 
 也可以在前端「爬虫管理」页面一键启动。
@@ -150,14 +146,10 @@ scrapy crawl douyin_hot
 
 | 爬虫名 | 数据源 | 说明 |
 |---|---|---|
-| `quotes_ai` | quotes.toscrape.com | 演示站：选择器快路径 + LLM 自愈兜底 + Playwright 渲染 |
-| `bilibili_hot` | B站 | 每日热门 / 全站排行榜 / 入站必刷（公开 API） |
-| `bilibili_weekly` | B站 | 「每周必看」官方 series 接口 |
-| `bilibili_comments` | B站 | 视频评论（reply/main 游标翻页；配 BILI_COOKIE 抓全量） |
-| `douban_top250` | 豆瓣 | 电影 / 图书 Top250（评分/金句/排名入 ES） |
 | `news_rss` | 人民网 / 中新网 / IT之家 / Solidot | 新闻 RSS 聚合（官方源合规抓取，中新网自动跟进文章页抓正文；`-a sources=` 可选源） |
 | `aihot_hot` | AIHOT（aihot.news） | AI 热点榜 Top10（官方 v1 API，事件 AI 综述入 ES，榜单自动清理跌出项） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
+| `quotes_ai` | quotes.toscrape.com | 演示站：选择器快路径 + LLM 自愈兜底 + Playwright 渲染 |
 
 ## API 接口
 
@@ -166,7 +158,7 @@ scrapy crawl douyin_hot
 | `/api/search/` | GET | 关键词搜索（支持 source 筛选、分页） |
 | `/api/suggest/` | GET | 搜索建议 |
 | `/api/stats/` | GET | 数据概览统计 |
-| `/api/rankings/` | GET | 榜单/新闻列表数据（榜单 5 个来源 + 新闻 5 路） |
+| `/api/rankings/` | GET | 榜单/新闻列表数据（AI 热点榜/抖音榜 + 新闻 5 路） |
 | `/api/crawl/start/` | POST | 启动爬虫 |
 | `/api/crawl/status/` | GET | 爬虫运行状态 |
 | `/api/crawl/history/` | GET | 爬虫历史记录 |
@@ -175,8 +167,6 @@ scrapy crawl douyin_hot
 | `/api/crawl/spiders/` | GET | 可用爬虫列表 |
 | `/api/crawl/schedule/` | GET/POST | 定时任务管理 |
 | `/api/img/` | GET | 图片代理（本地磁盘缓存） |
-| `/api/comments/` | GET | B站评论列表 |
-| `/api/comments/fetch/` | POST | 触发评论采集 |
 
 ## 环境变量
 
@@ -193,7 +183,6 @@ scrapy crawl douyin_hot
 | `AI_LLM_API_KEY` | （空） | DeepSeek API Key（爬虫 LLM 自愈抽取 / 验证码识别需要，不配置自动降级） |
 | `AI_LLM_BASE_URL` | `https://api.deepseek.com` | LLM API 地址 |
 | `AI_LLM_MODEL` | `deepseek-v4-flash` | LLM 模型 |
-| `BILI_COOKIE` | （空） | B站登录 Cookie（评论全量采集需要） |
 | `AI_PROXIES` | （空） | 住宅代理列表（逗号分隔） |
 | `API_TOKEN` | （空） | 设置后写操作与 AI 问答接口要求 `X-API-Token` 请求头（留空不启用） |
 
@@ -207,7 +196,7 @@ docker-compose up -d
 docker-compose logs -f backend
 
 # 采集数据
-docker-compose exec backend scrapy crawl bilibili_hot
+docker-compose exec backend scrapy crawl news_rss
 ```
 
 访问：

@@ -10,20 +10,17 @@ jobbole/拉勾/知乎老爬虫、fake-useragent）已全部移除，仓库只保
 
 ```
 爬虫（Scrapy 2.13+，位于 LcvSearch/crawler/）
-  ├─ quotes_ai          演示站：选择器快路径 + DeepSeek 自愈兜底 + Playwright 渲染
-  ├─ bilibili_hot       B站热门/排行榜/入站必刷（公开 API）
-  ├─ bilibili_weekly    B站「每周必看」官方 series 接口（老搜索接口需 WBI 已弃用）
-  ├─ bilibili_comments  B站视频评论（reply/main 游标翻页；配 BILI_COOKIE 抓全量，
-  │                     游客模式仅热评预览——cookie 只走环境变量，不入仓库）
-  ├─ douban_top250      豆瓣电影/读书 Top250（-a kind=movie|book，评分/金句/排名入 ES）
+  ├─ news_rss           新闻 RSS 聚合（人民网/中新网/IT之家/Solidot，官方源合规抓取）
+  ├─ aihot_hot          AI 热点榜（AIHOT 官方 v1 API，多信源印证事件 + AI 综述）
   ├─ douyin_hot         抖音热点榜 50 条（Playwright 渲染 + 页面文本解析）
+  ├─ quotes_ai          演示站：选择器快路径 + DeepSeek 自愈兜底 + Playwright 渲染
   ├─ 公共设施             scrapy-playwright 渲染 / browserforge 整组指纹头 / 住宅代理轮换
   └─ 入库               EsArticlePipeline -> Elasticsearch "quotes" 索引
                             └─> /api/search/  关键词搜索 + 搜索建议
 ```
 
 > 指纹头中间件用"替换"而非"追加"：Scrapy 内置 UA 中间件会先写默认 UA，
-> setdefault 会被覆盖导致真实 UA 不生效（实测曾让 B站 接口返回 412）。
+> setdefault 会被覆盖导致真实指纹头不生效（实测曾让目标站接口返回 412）。
 
 ## 二、AI 大模型：DeepSeek
 
@@ -56,20 +53,12 @@ scrapy crawl quotes_ai -a pages=2        # 1. 选择器快路径
 scrapy crawl quotes_ai -a js=1           # 2. Playwright 渲染 JS 页
 scrapy crawl quotes_ai --set SELECTORS_DISABLED=1   # 3. 模拟改版，看 LLM 自愈（需 key）
 
-# B站热门/排行榜/入站必刷（真实站点，数据进 ES 可搜索）
-scrapy crawl bilibili_hot                    # 每日热门 20 条
-scrapy crawl bilibili_hot -a mode=ranking    # 全站排行榜 100 条
-scrapy crawl bilibili_hot -a mode=precious   # 入站必刷
-scrapy crawl bilibili_hot -O bilibili.csv    # 兼容老脚本的 CSV 导出（Scrapy feed）
+# 新闻 RSS 聚合（4 个官方源，配定时任务每天增量）
+scrapy crawl news_rss                           # 全部源
+scrapy crawl news_rss -a sources=news_people    # 指定源
 
-# B站「每周必看」与评论（评论配 BILI_COOKIE 可抓全量，游客仅热评预览）
-scrapy crawl bilibili_weekly -a episodes=2
-export BILI_COOKIE="SESSDATA=...; ..."   # 可选，登录态
-scrapy crawl bilibili_comments -a bvid=BVxxxx -a pages=5
-
-# 豆瓣榜单（对频率敏感，已内置 2 秒延迟；被拦可配 AI_PROXIES 住宅代理）
-scrapy crawl douban_top250                   # 电影 Top250
-scrapy crawl douban_top250 -a kind=book      # 图书 Top250
+# AI 热点榜（AIHOT 官方 API，匿名只读，限速 2 秒间隔）
+scrapy crawl aihot_hot
 
 # 抖音热点榜（Playwright 渲染，约 30-60 秒）
 scrapy crawl douyin_hot
@@ -101,7 +90,7 @@ frontend/ (Vue3 + Vite + Element Plus, localhost:5173)
     /news     新闻列表（4源/时间倒序/分页） ─┤      LcvSearch API (Django, localhost:8000)
     /stats    数据概览（总量/来源/热搜）───┤      /api/search /api/suggest /api/stats
     /crawl    采集管理（触发+日志+定时任务）  ─┤      /api/crawl/* /api/rankings /api/img
-    /rankings 榜单（抖音/B站/豆瓣 5个来源）   ─┘
+    /rankings 榜单（AI 热点榜/抖音热点榜）   ─┘
 后端以子进程方式运行 Scrapy 爬虫（CrawlManager），数据经 ES 管道回流到搜索。
 ```
 
@@ -118,13 +107,10 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 
 ## 六、前端体验升级（参照同类开源项目形态）
 
-- **实体卡片化搜索**：豆瓣电影/图书（海报+评分+排名）、B站视频（封面+UP主+播放/点赞/弹幕）、
-  B站评论（气泡体），每类实体独立卡片模板；图床防盗链由后端 /api/img/ 白名单代理解决
-- **采集页对齐真实数据源**：可选 B站热门/每周必看/豆瓣电影/豆瓣图书/抖音热点/演示站
+- **采集页对齐真实数据源**：可选 新闻RSS / AI热点榜 / 抖音热点 / 演示站
   （/api/crawl/spiders 白名单），不再与页面数据源脱节
-- **榜单页多源聚合**：抖音热点榜（实时50条）、B站热门/每周必看、豆瓣电影/图书 Top250
-- **图片本地磁盘缓存**：豆瓣 Top250 等静态图片缓存到本地，首次 106ms → 缓存命中 1.5ms
-- 参考形态：Meilisearch instant-search、Perplexica、bilibili_CommentHunter
+- **榜单页多源聚合**：AI 热点榜（AIHOT 多信源印证）、抖音热点榜（实时50条）
+- **新闻列表页**：4 源按发布时间倒序分页展示，可一键触发增量采集
 
 ## 七、法律提醒（比技术更硬的边界）
 

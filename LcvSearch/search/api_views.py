@@ -15,9 +15,6 @@ import json
 import logging
 import math
 import os
-import subprocess
-import sys
-import threading
 import time
 
 from django.http import JsonResponse
@@ -28,18 +25,16 @@ from django.conf import settings
 from elasticsearch import Elasticsearch
 import redis
 
-from search.crawl_manager import SPIDER_DIR, LOG_DIR, crawl_manager, schedule_manager
+from search.crawl_manager import crawl_manager, schedule_manager
 from search.live_sources import LIVE_SOURCES, search_live, search_all_sources
 
 # 从 Django settings 读取 ES/Redis 配置（支持环境变量覆盖），不再硬编码
 ES_URL = settings.ES_URL
 INDEX = settings.ES_INDEX
-# 不参与关键词搜索的来源：榜单类走 /api/rankings，评论按视频查看
-# （/api/comments），演示站是教学数据（quotes.toscrape.com 练习站）
-RANKING_SOURCES = ("douyin_hot", "bilibili_hot", "bilibili_weekly", "douban_movie", "douban_book",
-                   "aihot_hot")
+# 不参与关键词搜索的来源：榜单类走 /api/rankings，演示站是教学数据
+# （quotes.toscrape.com 练习站）；bilibili_comments 为已下线功能的遗留数据
+RANKING_SOURCES = ("douyin_hot", "aihot_hot")
 SEARCH_EXCLUDED_SOURCES = RANKING_SOURCES + ("bilibili_comments", "quotes_ai")
-COMMENT_FETCH_TIMEOUT = 180   # 按需抓取单次子进程上限（秒）
 PAGE_SIZE = 10
 
 # 配置连接超时：ES/Redis 不可用时快速失败，避免每个请求长时间阻塞
@@ -362,7 +357,7 @@ def api_rankings(request):
     - 新闻（source=news 或具体新闻源）：按发布时间倒序 + 分页
       （语料随定时任务持续增长，不能一次拉全）
     """
-    source = request.GET.get("source", "bilibili_hot")
+    source = request.GET.get("source", "aihot_hot")
     try:
         page = max(int(request.GET.get("p", "1")), 1)
     except ValueError:
@@ -418,82 +413,6 @@ def api_rankings(request):
     return JsonResponse({"source": source, "total": len(items), "items": items})
 
 
-def api_comments(request):
-    """某视频的评论列表（评论按视频归属查看，不参与跨视频搜索）。"""
-    bvid = request.GET.get("bvid", "").strip()
-    if not bvid:
-        return JsonResponse({"error": "缺少参数 bvid"}, status=400)
-    try:
-        resp = client.search(
-            index=INDEX,
-            query={"bool": {"must": [
-                {"term": {"source": "bilibili_comments"}},
-                {"wildcard": {"url_object_id": "{}_*".format(bvid)}},
-            ]}},
-            sort=[{"praise_nums": {"order": "desc", "missing": "_last"}}],
-            size=100,
-        )
-    except Exception as e:
-        return _es_error(e)
-
-    comments = [{"author": h["_source"].get("author", ""),
-                 "content": h["_source"].get("content", ""),
-                 "likes": h["_source"].get("praise_nums", 0),
-                 "date": (h["_source"].get("create_date") or "")[:10]}
-                for h in resp["hits"]["hits"]]
-    return JsonResponse({"bvid": bvid, "total": len(comments), "comments": comments,
-                         "fetching": bvid in _COMMENT_INFLIGHT})
-
-
-# ---- 评论按需抓取：点"查看评论"时库内无数据则现场抓一次。独立轻量子进程，
-# 不占用采集页大任务的互斥锁；同一 bvid 同时只跑一个，其余请求拿到 fetching。
-_COMMENT_INFLIGHT = set()
-_COMMENT_FETCH_LOCK = threading.Lock()
-
-
-@require_api_token
-@csrf_exempt
-@require_http_methods(["POST"])
-def api_comments_fetch(request):
-    from urllib.parse import urlparse
-    bvid = (payload_bvid(request) or "").strip()
-    if not bvid.startswith("BV"):
-        return JsonResponse({"error": "bvid 需以 BV 开头"}, status=400)
-    with _COMMENT_FETCH_LOCK:
-        if bvid in _COMMENT_INFLIGHT:
-            return JsonResponse({"fetching": True}, status=202)
-        _COMMENT_INFLIGHT.add(bvid)
-
-    def _run():
-        try:
-            os.makedirs(LOG_DIR, exist_ok=True)
-            log_path = os.path.join(LOG_DIR, "cmt_fetch_{}.log".format(bvid))
-            # 用 with 语句管理文件句柄，确保 subprocess 异常时也能关闭
-            with open(log_path, "w") as log:
-                subprocess.run(
-                    [sys.executable, "-m", "scrapy", "crawl", "bilibili_comments",
-                     "-a", "bvid={}".format(bvid), "-a", "pages=2"],
-                    cwd=SPIDER_DIR,
-                    stdout=log, stderr=subprocess.STDOUT,
-                    timeout=COMMENT_FETCH_TIMEOUT)
-        except Exception as e:
-            logger.error("评论按需抓取失败 %s: %s", bvid, e)
-        finally:
-            time.sleep(1.2)  # 等 ES refresh，前端随后 GET 即可拿到数据
-            with _COMMENT_FETCH_LOCK:
-                _COMMENT_INFLIGHT.discard(bvid)
-
-    threading.Thread(target=_run, daemon=True).start()
-    return JsonResponse({"fetching": True}, status=202)
-
-
-def payload_bvid(request):
-    try:
-        return (json.loads(request.body or b"{}").get("bvid") or "").strip()
-    except Exception:
-        return ""
-
-
 @require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -502,8 +421,7 @@ def api_crawl_start(request):
         payload = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
         return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
-    spider = payload.get("spider", "bilibili_hot")
-    bvid = (payload.get("bvid") or "").strip()
+    spider = payload.get("spider", "douyin_hot")
     resume_job = (payload.get("resume_job") or "").strip()
     try:
         pages = min(max(int(payload.get("pages", 2)), 1), 20)
@@ -511,7 +429,7 @@ def api_crawl_start(request):
         pages = 2
     js = bool(payload.get("js", False))
 
-    result = crawl_manager.start(spider=spider, pages=pages, js=js, bvid=bvid,
+    result = crawl_manager.start(spider=spider, pages=pages, js=js,
                                   resume_job=resume_job)
     status_code = 202 if result.get("started") else 409
     return JsonResponse(result, status=status_code)
@@ -554,7 +472,7 @@ def api_schedule_list(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_add(request):
-    """添加定时任务。body: {spider, cron, pages?, js?, bvid?}
+    """添加定时任务。body: {spider, cron, pages?, js?}
 
     cron 格式：分 时 日 月 周（如 "0 8 * * *" = 每天8点，"*/30 * * * *" = 每30分钟）
     """
@@ -571,8 +489,7 @@ def api_schedule_add(request):
     except (TypeError, ValueError):
         pages = 2
     js = bool(payload.get("js", False))
-    bvid = (payload.get("bvid") or "").strip()
-    result = schedule_manager.add(spider=spider, cron=cron, pages=pages, js=js, bvid=bvid)
+    result = schedule_manager.add(spider=spider, cron=cron, pages=pages, js=js)
     status_code = 201 if result.get("ok") else 400
     return JsonResponse(result, status=status_code)
 

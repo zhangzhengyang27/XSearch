@@ -30,16 +30,10 @@ export const api = {
     return request(`/api/suggest/?s=${encodeURIComponent(s)}`)
   },
   stats: () => request('/api/stats/'),
-  crawlStart: (spider, pages, js, bvid = '') => request('/api/crawl/start/', {
+  crawlStart: (spider, pages, js) => request('/api/crawl/start/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spider, pages, js, bvid }),
-  }),
-  comments: (bvid) => request(`/api/comments/?bvid=${encodeURIComponent(bvid)}`),
-  fetchComments: (bvid) => request('/api/comments/fetch/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bvid }),
+    body: JSON.stringify({ spider, pages, js }),
   }),
   crawlStatus: () => request('/api/crawl/status/'),
   crawlHistory: (limit = 50) => request(`/api/crawl/history/?limit=${limit}`),
@@ -48,11 +42,11 @@ export const api = {
   crawlSpiders: () => request('/api/crawl/spiders/'),
   // 定时任务
   scheduleList: () => request('/api/crawl/schedule/'),
-  scheduleAdd: (spider, cron, pages = 2, js = false, bvid = '') =>
+  scheduleAdd: (spider, cron, pages = 2, js = false) =>
     request('/api/crawl/schedule/add/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ spider, cron, pages, js, bvid }),
+      body: JSON.stringify({ spider, cron, pages, js }),
     }),
   scheduleRemove: (jobId) => request('/api/crawl/schedule/remove/', {
     method: 'POST',

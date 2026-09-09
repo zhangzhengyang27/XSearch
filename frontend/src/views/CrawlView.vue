@@ -10,10 +10,6 @@
             </el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="needBvid" label="视频 BV 号">
-          <el-input v-model="bvid" placeholder="例如 BV1HBbE6cEc5，可从榜单页视频链接复制"
-                    style="max-width: 420px" clearable />
-        </el-form-item>
         <el-form-item v-if="spider === 'quotes_ai'" label="抓取页数">
           <el-slider v-model="pages" :min="1" :max="20" show-input style="max-width: 420px" />
         </el-form-item>
@@ -185,23 +181,18 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
 
 // 初始值包含完整列表（与后端 SPIDERS 配置一致），后端离线时仍可正常展示
 const spiders = ref([
-  { key: 'bilibili_hot', label: 'B站热门', needs_bvid: false },
-  { key: 'bilibili_weekly', label: 'B站每周必看', needs_bvid: false },
-  { key: 'bilibili_comments', label: 'B站评论', needs_bvid: true },
-  { key: 'douban_movie', label: '豆瓣电影Top250', needs_bvid: false },
-  { key: 'douban_book', label: '豆瓣图书Top250', needs_bvid: false },
-  { key: 'news_rss', label: '新闻RSS(4源)', needs_bvid: false },
+  { key: 'douyin_hot', label: '抖音热点榜', needs_bvid: false },
   { key: 'aihot_hot', label: 'AI热点榜(AIHOT)', needs_bvid: false },
+  { key: 'news_rss', label: '新闻RSS(4源)', needs_bvid: false },
   { key: 'quotes_ai', label: '演示站(教学)', needs_bvid: false },
 ])
-const bvid = ref('')
-const spider = ref('bilibili_hot')
+const spider = ref('douyin_hot')
 const pages = ref(2)
 const js = ref(false)
 const starting = ref(false)
@@ -220,12 +211,7 @@ function schedule() {
 async function start() {
   starting.value = true
   try {
-    if (needBvid.value && !bvid.value.trim()) {
-      ElMessage.warning('请填写视频 BV 号')
-      starting.value = false
-      return
-    }
-    const r = await api.crawlStart(spider.value, pages.value, js.value, bvid.value.trim())
+    const r = await api.crawlStart(spider.value, pages.value, js.value)
     if (r.started) ElMessage.success(`「${r.label || spider.value}」采集任务已启动`)
     else ElMessage.warning(r.reason || '启动失败')
     await refresh()
@@ -236,15 +222,9 @@ async function start() {
   }
 }
 
-const needBvid = ref(false)
-watch(spider, (k) => {
-  const s = spiders.value.find(x => x.key === k)
-  needBvid.value = !!(s && s.needs_bvid)
-})
-
 // ---- 定时任务 ----
 const scheduleData = ref({ jobs: [], history: [], scheduler_active: true })
-const newSchedule = ref({ spider: 'bilibili_hot', cron: '0 8 * * *' })
+const newSchedule = ref({ spider: 'douyin_hot', cron: '0 8 * * *' })
 const addingSchedule = ref(false)
 
 async function refreshSchedule() {
@@ -262,7 +242,7 @@ async function addSchedule() {
   try {
     const r = await api.scheduleAdd(
       newSchedule.value.spider, newSchedule.value.cron,
-      pages.value, js.value, bvid.value.trim()
+      pages.value, js.value
     )
     if (r.ok) {
       ElMessage.success(r.scheduler_active ? '定时任务已添加' : '任务已保存（APScheduler 未安装，不会自动触发）')
@@ -321,9 +301,9 @@ onMounted(async () => {
     const d = await api.crawlSpiders()
     if (d.spiders?.length) {
       spiders.value = d.spiders
-      const sel = d.spiders.find(s => s.key === spider.value)
-      if (!sel) { spider.value = d.spiders[0].key }
-      else { needBvid.value = !!sel.needs_bvid }
+      if (!d.spiders.find(s => s.key === spider.value)) {
+        spider.value = d.spiders[0].key
+      }
     }
   } catch { /* 用默认列表 */ }
 })

@@ -4,7 +4,7 @@
       <el-input
         v-model="query"
         size="large"
-        placeholder="搜电影 / 图书（B站榜单在「榜单」页，评论在榜单视频卡内）"
+        placeholder="搜新闻 / 文章 / 歌曲"
         clearable
         @keyup.enter="doSearch(1)"
         :loading="loading"
@@ -75,59 +75,9 @@
       </div>
     </el-empty>
 
-    <!-- 豆瓣电影 / 图书：海报卡 -->
+    <!-- 网易云音乐：歌曲卡 -->
     <article v-for="(r, i) in results" :key="i">
-      <div v-if="kind(r) === 'douban'" class="card media-card">
-        <img v-if="r.front_image_url" :src="imgUrl(r.front_image_url)" referrerpolicy="no-referrer"
-             loading="lazy" class="poster" @error="hideImg">
-        <div class="media-body">
-          <a :href="r.url" target="_blank" rel="noopener" class="card-title">
-            <span v-html="renderHighlight(r.title)"></span>
-            <span class="stars" v-if="r.rating">⭐ {{ r.rating }}</span>
-            <el-tag v-if="r.rank" size="small" effect="plain" type="warning">No.{{ r.rank }}</el-tag>
-          </a>
-          <div class="card-meta">
-            <span>{{ kindLabel(r) }}</span>
-            <span v-if="r.author"> {{ r.source === 'douban_movie' ? '🎬' : '📖' }} {{ r.author }}</span>
-          </div>
-          <p class="card-content" v-html="renderHighlight(r.content)"></p>
-        </div>
-      </div>
-
-      <!-- B站视频：封面卡 -->
-      <div v-else-if="kind(r) === 'video'" class="card media-card">
-        <img v-if="r.front_image_url" :src="imgUrl(r.front_image_url)" referrerpolicy="no-referrer"
-             loading="lazy" class="cover" @error="hideImg">
-        <div class="media-body">
-          <a :href="r.url" target="_blank" rel="noopener" class="card-title">
-            <span v-html="renderHighlight(r.title)"></span>
-            <el-tag size="small" effect="plain" type="danger" class="src-tag">{{ kindLabel(r) }}</el-tag>
-          </a>
-          <div class="card-meta">
-            <span v-if="r.author">👤 {{ r.author }}</span>
-            <span v-if="r.view_nums != null">▶ {{ formatNum(r.view_nums) }}</span>
-            <span v-if="r.praise_nums != null">👍 {{ formatNum(r.praise_nums) }}</span>
-            <span v-if="r.danmaku_nums != null">💬 {{ formatNum(r.danmaku_nums) }} 弹幕</span>
-            <span v-if="r.create_date">📅 {{ r.create_date }}</span>
-          </div>
-          <p class="card-content" v-if="r.content" v-html="renderHighlight(r.content)"></p>
-        </div>
-      </div>
-
-      <!-- B站评论：气泡体 -->
-      <div v-else-if="kind(r) === 'comment'" class="card comment-card">
-        <div class="comment-head">
-          <span class="avatar">{{ (r.author || '匿')[0] }}</span>
-          <b>{{ r.author }}</b>
-          <span class="dim" v-if="r.create_date">{{ r.create_date }}</span>
-          <span class="dim" v-if="r.praise_nums">👍 {{ formatNum(r.praise_nums) }}</span>
-          <a :href="r.url" target="_blank" rel="noopener" class="ctx">来源视频</a>
-        </div>
-        <p class="comment-body" v-html="renderHighlight(r.content)"></p>
-      </div>
-
-      <!-- 网易云音乐：歌曲卡 -->
-      <div v-else-if="kind(r) === 'music'" class="card media-card">
+      <div v-if="kind(r) === 'music'" class="card media-card">
         <div class="music-icon">♪</div>
         <div class="media-body">
           <a :href="r.url" target="_blank" rel="noopener" class="card-title">
@@ -175,7 +125,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { api, renderHighlight, formatNum, imgUrl } from '../api.js'
+import { api, renderHighlight } from '../api.js'
 
 const query = ref('')
 const source = ref('')
@@ -202,15 +152,14 @@ const DAY_OPTIONS = [
   { value: '90', label: '近90天' },
 ]
 // 实时 Tab（B站视频/网易云/掘金/全网聚合）不支持排序/分面参数
-const LIVE_TABS = new Set(['all', 'bilibili_video', 'netease_music', 'juejin_article'])
+const LIVE_TABS = new Set(['all', 'netease_music', 'juejin_article'])
 const isLiveTab = computed(() => LIVE_TABS.has(source.value))
 
 const sourceLabel = (s) => SOURCE_NAMES[s] || s
 
 const SOURCE_NAMES = {
   all: '全网搜索(实时)',
-  douban_movie: '豆瓣电影', douban_book: '豆瓣图书',
-  bilibili_video: 'B站视频', juejin_article: '掘金文章',
+  juejin_article: '掘金文章',
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
 }
@@ -218,10 +167,7 @@ const SOURCE_NAMES = {
 const TAB_SOURCES = {
   '': '全部',
   all: '全网(实时)',
-  bilibili_video: 'B站视频',
   netease_music: '网易云音乐',
-  douban_movie: '豆瓣电影',
-  douban_book: '豆瓣图书',
   juejin_article: '掘金文章',
 }
 const PAGE_SIZE = 10  // 与后端 PAGE_SIZE 保持一致
@@ -233,14 +179,10 @@ function switchSource(key) {
 const kindLabel = (r) => SOURCE_NAMES[r.source] || r.source
 // 实体类型 -> 卡片模板
 const kind = (r) => {
-  if (r.source === 'bilibili_comments') return 'comment'
-  if (r.source && r.source.startsWith('bilibili_')) return 'video'
-  if (r.source && r.source.startsWith('douban_')) return 'douban'
   if (r.source === 'netease_music') return 'music'
   if (r.source === 'juejin_article') return 'article'
   return 'generic'
 }
-const hideImg = (e) => { e.target.style.display = 'none' }
 
 let suggestTimer = null
 let suggestSeq = 0  // 请求序号：防止旧请求的响应覆盖新结果（竞态条件）
@@ -329,15 +271,12 @@ function setDays(v) {
   transition: box-shadow .2s;
 }
 .card:hover { box-shadow: var(--el-box-shadow-light); }
-.poster { width: 92px; height: 132px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #f2f3f5; }
-.cover { width: 176px; height: 108px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #f2f3f5; }
 .media-body { flex: 1; min-width: 0; }
 .card-title {
   font-size: 16px; font-weight: 600; color: var(--el-color-primary);
   text-decoration: none; display: inline-block; margin-bottom: 6px;
 }
 .card-title:hover { text-decoration: underline; }
-.stars { color: #f7ba2a; font-size: 13px; margin: 0 8px; }
 .src-tag { margin-left: 8px; }
 .card-meta {
   display: flex; gap: 14px; flex-wrap: wrap;
@@ -350,19 +289,6 @@ function setDays(v) {
   width: 64px; height: 64px; border-radius: 10px; flex-shrink: 0;
   background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff;
   font-size: 30px; display: flex; align-items: center; justify-content: center;
-}
-.comment-card { flex-direction: column; gap: 8px; }
-.comment-head { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.avatar {
-  width: 28px; height: 28px; border-radius: 50%; background: var(--el-color-primary-light-7);
-  color: var(--el-color-primary); display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 600;
-}
-.dim { color: var(--el-text-color-secondary); font-size: 12px; }
-.ctx { margin-left: auto; font-size: 12px; }
-.comment-body {
-  margin: 0; background: var(--el-fill-color-light); border-radius: 0 10px 10px 10px;
-  padding: 10px 14px; font-size: 14px; line-height: 1.7;
 }
 .pager { display: flex; justify-content: center; margin-top: 20px; }
 .alt-suggest { margin-top: 4px; }

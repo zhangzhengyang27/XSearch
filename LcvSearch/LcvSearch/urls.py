@@ -10,7 +10,6 @@ from django.views.generic import View
 from search.api_views import (api_crawl_start, api_crawl_status,
                               api_crawl_spiders, api_crawl_history, api_crawl_stats,
                               api_crawl_resumable,
-                              api_comments, api_comments_fetch,
                               api_img, api_rankings,
                               api_schedule_add, api_schedule_list, api_schedule_remove,
                               api_schedule_toggle,
@@ -48,6 +47,4 @@ urlpatterns = [
     path('api/crawl/schedule/remove/', api_schedule_remove, name="api-schedule-remove"),
     path('api/crawl/schedule/toggle/', api_schedule_toggle, name="api-schedule-toggle"),
     path('api/img/', api_img, name="api-img"),
-    path('api/comments/', api_comments, name="api-comments"),
-    path('api/comments/fetch/', api_comments_fetch, name="api-comments-fetch"),
 ]

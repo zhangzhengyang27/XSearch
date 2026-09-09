@@ -2,7 +2,7 @@
 """实时联邦搜索：把外部平台的搜索结果接入本站。
 
 与批量爬虫的分工：
-    - 批量爬虫（bilibili_hot 等）：定时/手动采集"榜单/全集"型数据，进 ES；
+    - 批量爬虫（news_rss 等）：定时/手动采集"榜单/全集"型数据，进 ES；
     - 实时联邦搜索（本模块）：用户搜索时选了外部平台，现场调该平台搜索接口，
       结果直接返回给前端，同时后台写入 ES 累积语料（供搜索复用）。
 
@@ -80,94 +80,6 @@ _SESSION.headers.update({"User-Agent": _UA})
 RISK_HINT = {412: "B站 风控拦截", 418: "豆瓣风控拦截"}
 
 
-# ---------------------------------------------------------------- B站全站搜索
-_WBI_TAB = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43,
-            5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16,
-            24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59,
-            6, 63, 57, 62, 11, 36, 20, 34, 44, 52]
-_BILI_HOME = "https://www.bilibili.com/"
-
-# WBI mixin key 缓存：有效期通常数小时，避免每次搜索都重新请求 nav 接口
-_wbi_cache = {"mixin_key": None, "expires_at": 0.0}
-_WBI_CACHE_TTL = 3600  # 1 小时
-
-
-def _wbi_mixin_key(session):
-    import time as _time
-    # 命中缓存且未过期时直接返回
-    if _wbi_cache["mixin_key"] and _time.time() < _wbi_cache["expires_at"]:
-        return _wbi_cache["mixin_key"]
-    nav = session.get("https://api.bilibili.com/x/web-interface/nav", timeout=10).json()
-    img = nav["data"]["wbi_img"]
-    img_key = img["img_url"].rsplit("/", 1)[1].split(".")[0]
-    sub_key = img["sub_url"].rsplit("/", 1)[1].split(".")[0]
-    full = img_key + sub_key
-    mixin = "".join(full[i] for i in _WBI_TAB)[:32]
-    _wbi_cache["mixin_key"] = mixin
-    _wbi_cache["expires_at"] = _time.time() + _WBI_CACHE_TTL
-    return mixin
-
-
-def _wbi_query(params):
-    """按 B站 WBI 算法编码查询串：剔除值中的 !'()*，空格编码为 %20。
-
-    直接用 urlencode（空格 -> +）会导致服务端重算签名与本地 md5 不一致，
-    关键词含空格/特殊字符时 B站 返回风控错误。
-    """
-    import urllib.parse
-    filtered = {k: "".join(c for c in str(v) if c not in "!'()*")
-                for k, v in params.items()}
-    return urllib.parse.urlencode(filtered, quote_via=urllib.parse.quote)
-
-
-def search_bilibili(query, page=1):
-    """B站全站视频搜索（WBI 签名；来源 bilibili_video）。"""
-    import hashlib
-    import time as _time
-    import urllib.parse
-
-    # 复用模块级 _SESSION（已配置 UA），避免每次新建 Session 浪费连接池
-    session = _SESSION
-    session.headers.update({"Referer": _BILI_HOME})
-    session.get(_BILI_HOME, timeout=10)  # 取 buvid cookie
-
-    mixin = _wbi_mixin_key(session)
-    params = {"keyword": query, "search_type": "video", "page": page,
-              "wts": int(_time.time())}
-    q = _wbi_query(dict(sorted(params.items())))
-    w_rid = hashlib.md5((q + mixin).encode()).hexdigest()
-    resp = session.get(
-        "https://api.bilibili.com/x/web-interface/wbi/search/type?{}&w_rid={}".format(q, w_rid),
-        timeout=10).json()
-    if resp.get("code") != 0:
-        raise RuntimeError("B站搜索失败 code={}".format(resp.get("code")))
-
-    from datetime import datetime
-    out = []
-    for rank, v in enumerate(resp["data"]["result"] or [], 1):
-        stat = v.get("stat") or {}
-        title = re.sub(r"</?em[^>]*>", "", v.get("title") or "")
-        pubdate = v.get("pubdate")
-        out.append({
-            "url_object_id": v.get("bvid") or str(v.get("aid")),
-            "title": title,
-            "content": (v.get("description") or title)[:200],
-            "author": (v.get("author") or ""),
-            "tags": [],
-            "url": "https://www.bilibili.com/video/{}".format(v.get("bvid")),
-            "front_image_url": v.get("pic") or "",
-            "praise_nums": stat.get("like", 0),
-            "view_nums": stat.get("play", 0),
-            "reply_nums": stat.get("review", 0),
-            "danmaku_nums": stat.get("danmaku", 0),
-            "duration": v.get("duration", 0),
-            "rank": rank,
-            "source": "bilibili_video",
-            "create_date": datetime.fromtimestamp(pubdate) if pubdate else None,
-        })
-    return out
-
-
 # ---------------------------------------------------------------- 网易云音乐
 def search_netease(query, page=1):
     """网易云音乐歌曲搜索（来源 netease_music）。"""
@@ -231,7 +143,6 @@ def search_juejin(query, page=1):
 
 
 LIVE_SOURCES = {
-    "bilibili_video": search_bilibili,
     "netease_music": search_netease,
     "juejin_article": search_juejin,
 }

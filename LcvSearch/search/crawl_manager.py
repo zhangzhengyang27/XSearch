@@ -35,14 +35,6 @@ MAX_HISTORY = 200  # 最多保留 200 条历史记录
 SPIDERS = {
     "douyin_hot":         {"scrapy_name": "douyin_hot", "label": "抖音热点榜"},
     "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
-    "bilibili_hot":       {"scrapy_name": "bilibili_hot", "label": "B站热门"},
-    "bilibili_weekly":    {"scrapy_name": "bilibili_weekly", "label": "B站每周必看"},
-    "bilibili_comments":  {"scrapy_name": "bilibili_comments", "label": "B站评论",
-                           "needs_bvid": True},
-    "douban_movie":       {"scrapy_name": "douban_top250", "label": "豆瓣电影Top250",
-                           "extra_args": ["-a", "kind=movie"]},
-    "douban_book":        {"scrapy_name": "douban_top250", "label": "豆瓣图书Top250",
-                           "extra_args": ["-a", "kind=book"]},
     "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
     "quotes_ai":          {"scrapy_name": "quotes_ai", "label": "演示站(教学)"},
 }
@@ -143,7 +135,7 @@ class CrawlManager(object):
         except Exception:
             return None
 
-    def start(self, spider="bilibili_hot", pages=2, js=False, bvid="", resume_job=None):
+    def start(self, spider="douyin_hot", pages=2, js=False, resume_job=None):
         """启动爬虫任务。
 
         :param resume_job: 要恢复的任务 ID（JOBDIR 名称），None 表示新任务。
@@ -152,8 +144,6 @@ class CrawlManager(object):
         spec = SPIDERS.get(spider)
         if spec is None:
             return {"started": False, "reason": "未知爬虫: {}".format(spider)}
-        if spec.get("needs_bvid") and not bvid:
-            return {"started": False, "reason": "该爬虫需要提供视频 BV 号"}
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return {"started": False, "reason": "已有采集任务在运行",
@@ -177,8 +167,6 @@ class CrawlManager(object):
 
             cmd = [sys.executable, "-m", "scrapy", "crawl", spec["scrapy_name"]]
             cmd += spec.get("extra_args", [])
-            if spec.get("needs_bvid"):
-                cmd += ["-a", "bvid={}".format(bvid)]
             if spider == "quotes_ai":
                 cmd += ["-a", "pages={}".format(pages)]
                 if js:
@@ -257,8 +245,7 @@ class CrawlManager(object):
 
     @staticmethod
     def list_spiders():
-        return [{"key": k, "label": v["label"], "needs_bvid": bool(v.get("needs_bvid"))}
-                for k, v in SPIDERS.items()]
+        return [{"key": k, "label": v["label"]} for k, v in SPIDERS.items()]
 
     @staticmethod
     def list_resumable_jobs():
@@ -306,7 +293,7 @@ class ScheduleManager(object):
 
     def __init__(self):
         self._scheduler = None
-        self._jobs = {}  # job_id -> {spider, pages, js, bvid, cron, enabled, created_at}
+        self._jobs = {}  # job_id -> {spider, pages, js, cron, enabled, created_at}
         self._history = []  # 最近触发记录 [{job_id, spider, time, status, reason}]
         self._lock = threading.Lock()
         self._load()
@@ -399,10 +386,9 @@ class ScheduleManager(object):
         if not job:
             return
         result = crawl_manager.start(
-            spider=job.get("spider", "bilibili_hot"),
+            spider=job.get("spider", "douyin_hot"),
             pages=job.get("pages", 2),
             js=job.get("js", False),
-            bvid=job.get("bvid", ""),
         )
         with self._lock:
             self._history.append({
@@ -415,7 +401,7 @@ class ScheduleManager(object):
             self._history = self._history[-20:]
             self._save()
 
-    def add(self, spider, cron, pages=2, js=False, bvid=""):
+    def add(self, spider, cron, pages=2, js=False):
         """添加定时任务。cron 格式：分 时 日 月 周（如 "0 8 * * *" = 每天8点）。"""
         if spider not in SPIDERS:
             return {"ok": False, "reason": "未知爬虫: {}".format(spider)}
@@ -424,7 +410,7 @@ class ScheduleManager(object):
             return {"ok": False, "reason": cron_error}
         job_id = "job_{}".format(int(time.time() * 1000))
         job = {
-            "spider": spider, "pages": pages, "js": js, "bvid": bvid,
+            "spider": spider, "pages": pages, "js": js,
             "cron": cron, "enabled": True,
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "label": SPIDERS[spider]["label"],
