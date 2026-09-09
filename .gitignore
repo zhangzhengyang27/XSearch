@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .env
 
+# 本地私有配置（管理员账号等，严禁提交）
+XSearch/local_settings.py
+
 # Django / 运行时产物
 db.sqlite3
 XSearch/logs/

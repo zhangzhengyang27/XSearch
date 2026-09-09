@@ -10,7 +10,7 @@ XSearch 基础单元测试。
 import json
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase, RequestFactory
+from django.test import SimpleTestCase, TestCase, RequestFactory, override_settings
 
 from search.api_views import api_rankings, api_search, api_suggest, api_stats
 
@@ -138,6 +138,22 @@ class CorsMiddlewareTests(TestCase):
         response = middleware(request)
         self.assertNotIn('Access-Control-Allow-Origin', response)
 
+    def test_cors_allows_put_delete_methods(self):
+        """数据管理接口使用 PUT/DELETE，跨域预检必须放行这两个方法。"""
+        from xsearch.middleware import CorsMiddleware
+        factory = RequestFactory()
+        request = factory.get('/api/search/', HTTP_ORIGIN='http://localhost:5173')
+
+        def get_response(req):
+            from django.http import JsonResponse
+            return JsonResponse({'ok': True})
+
+        middleware = CorsMiddleware(get_response)
+        response = middleware(request)
+        methods = response['Access-Control-Allow-Methods']
+        self.assertIn('PUT', methods)
+        self.assertIn('DELETE', methods)
+
     def test_options_request_returns_empty_response(self):
         """OPTIONS 预检请求应直接返回空响应（不调用视图）。"""
         from xsearch.middleware import CorsMiddleware
@@ -221,6 +237,222 @@ class ApiRankingsTests(TestCase):
                 mock_client.search.return_value = {'hits': {'total': {'value': 0}, 'hits': []}}
                 response = api_rankings(request)
             self.assertEqual(response.status_code, 200)
+
+
+class AdminAuthTests(TestCase):
+    """管理员登录与采集管理接口鉴权测试。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        from search import api_views
+        api_views._admin_tokens.clear()
+
+    def _post_json(self, url, payload):
+        return self.factory.post(url, data=json.dumps(payload),
+                                 content_type='application/json')
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_login_success_and_token_works(self):
+        """正确账号登录签发 token，携带该 token 可访问采集管理接口。"""
+        from search.api_views import api_admin_login, api_crawl_stats
+        resp = api_admin_login(self._post_json(
+            '/api/auth/login/', {'username': 'admin', 'password': 'secret'}))
+        self.assertEqual(resp.status_code, 200)
+        token = json.loads(resp.content)['token']
+        with patch('search.api_views.crawl_manager') as mock_mgr:
+            mock_mgr.stats.return_value = {}
+            ok = api_crawl_stats(self.factory.get(
+                '/api/crawl/stats/', HTTP_X_ADMIN_TOKEN=token))
+        self.assertEqual(ok.status_code, 200)
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_login_wrong_password_rejected(self):
+        from search.api_views import api_admin_login
+        resp = api_admin_login(self._post_json(
+            '/api/auth/login/', {'username': 'admin', 'password': 'bad'}))
+        self.assertEqual(resp.status_code, 401)
+
+    @override_settings(ADMIN_USERNAME='', ADMIN_PASSWORD='')
+    def test_login_without_config_rejected(self):
+        """未配置管理员账号时登录直接拒绝，不得存在默认账号。"""
+        from search.api_views import api_admin_login
+        resp = api_admin_login(self._post_json(
+            '/api/auth/login/', {'username': 'admin', 'password': 'x'}))
+        self.assertEqual(resp.status_code, 500)
+
+    def test_protected_endpoint_requires_token(self):
+        """采集管理接口无 token 应返回 401（auth_required）。"""
+        from search.api_views import api_crawl_history
+        resp = api_crawl_history(self.factory.get('/api/crawl/history/'))
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(json.loads(resp.content)['code'], 'auth_required')
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_logout_revokes_token(self):
+        """退出登录吊销 token，后续请求重新回到 401。"""
+        from search.api_views import api_admin_login, api_admin_logout, api_crawl_stats
+        resp = api_admin_login(self._post_json(
+            '/api/auth/login/', {'username': 'admin', 'password': 'secret'}))
+        token = json.loads(resp.content)['token']
+        api_admin_logout(self.factory.post(
+            '/api/auth/logout/', HTTP_X_ADMIN_TOKEN=token))
+        with patch('search.api_views.crawl_manager'):
+            after = api_crawl_stats(self.factory.get(
+                '/api/crawl/stats/', HTTP_X_ADMIN_TOKEN=token))
+        self.assertEqual(after.status_code, 401)
+
+
+class AdminDbTests(TestCase):
+    """数据管理接口测试（ES mock，鉴权复用 AdminAuthTests 的 token 机制）。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        from search import api_views
+        api_views._admin_tokens.clear()
+        # 直接注入一个未过期的合法 token，避免每个用例都走登录流程
+        self.token = 'testtoken'
+        api_views._admin_tokens[self.token] = api_views.time.time() + 3600
+
+    def _auth(self):
+        return {'HTTP_X_ADMIN_TOKEN': self.token}
+
+    def _put_json(self, url, payload):
+        return self.factory.put(url, data=json.dumps(payload),
+                                content_type='application/json', **self._auth())
+
+    def test_overview_requires_admin(self):
+        """数据管理接口无 token 应返回 401。"""
+        from search.api_views import api_db_overview
+        resp = api_db_overview(self.factory.get('/api/admin/db/overview/'))
+        self.assertEqual(resp.status_code, 401)
+
+    def test_overview_stats_and_aggregation(self):
+        from search.api_views import api_db_overview
+        with patch('search.api_views.client') as mock_client:
+            mock_client.indices.stats.return_value = {
+                '_all': {'primaries': {'docs': {'count': 42},
+                                       'store': {'size_in_bytes': 1024}}}}
+            mock_client.search.return_value = {
+                'aggregations': {'by_source': {'buckets': [
+                    {'key': 'news_ithome', 'doc_count': 40},
+                    {'key': 'douyin_hot', 'doc_count': 2}]}}}
+            resp = api_db_overview(self.factory.get('/api/admin/db/overview/',
+                                                    **self._auth()))
+        data = json.loads(resp.content)
+        self.assertEqual(data['total'], 42)
+        self.assertEqual(data['size_bytes'], 1024)
+        self.assertEqual(data['by_source'][0]['key'], 'news_ithome')
+
+    def test_docs_applies_source_filter_and_paging(self):
+        from search.api_views import api_db_docs
+        with patch('search.api_views.client') as mock_client:
+            mock_client.search.return_value = {
+                'hits': {'total': {'value': 0}, 'hits': []}}
+            resp = api_db_docs(self.factory.get('/api/admin/db/docs/',
+                                                {'source': 'douyin_hot', 'p': '2'},
+                                                **self._auth()))
+            kwargs = mock_client.search.call_args[1]
+            self.assertEqual(kwargs['query']['bool']['filter'],
+                             [{'term': {'source': 'douyin_hot'}}])
+            self.assertEqual(kwargs['from_'], 20)  # 第 2 页 × 每页 20
+            self.assertEqual(kwargs['sort'], [{'crawled_at': {'order': 'desc',
+                                                              'missing': '_last'}}])
+        data = json.loads(resp.content)
+        self.assertEqual(data['page'], 2)
+
+    def test_doc_update_rejects_non_whitelisted_fields(self):
+        """编辑接口字段白名单：只传 url 等不可编辑字段应返回 400。"""
+        from search.api_views import api_db_doc
+        with patch('search.api_views.client'):
+            resp = api_db_doc(self._put_json('/api/admin/db/doc/abc/',
+                                             {'url': 'http://evil'}), 'abc')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_doc_update_rejects_empty_title(self):
+        from search.api_views import api_db_doc
+        with patch('search.api_views.client'):
+            resp = api_db_doc(self._put_json('/api/admin/db/doc/abc/',
+                                             {'title': '   '}), 'abc')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_doc_update_builds_suggest_and_partial_doc(self):
+        """合法编辑：partial doc 只含白名单字段，改标题时重建 suggest。"""
+        from search.api_views import api_db_doc
+        with patch('search.api_views.client') as mock_client:
+            mock_client.get.return_value = {'_id': 'abc',
+                                            '_source': {'author': '旧作者'}}
+            resp = api_db_doc(self._put_json('/api/admin/db/doc/abc/',
+                                             {'title': '新标题', 'url': 'x'}), 'abc')
+            kwargs = mock_client.update.call_args[1]
+            self.assertEqual(kwargs['doc']['title'], '新标题')
+            self.assertNotIn('url', kwargs['doc'])
+            self.assertEqual(kwargs['doc']['suggest']['input'][0], '新标题')
+        self.assertEqual(resp.status_code, 200)
+
+    def test_doc_update_author_only_rebuilds_suggest_with_stored_title(self):
+        """只改作者：suggest 仍需重建，标题取库内现值。"""
+        from search.api_views import api_db_doc
+        with patch('search.api_views.client') as mock_client:
+            mock_client.get.return_value = {
+                '_id': 'abc',
+                '_source': {'title': '库内标题', 'author': '旧作者'}}
+            resp = api_db_doc(self._put_json('/api/admin/db/doc/abc/',
+                                             {'author': '新作者'}), 'abc')
+            kwargs = mock_client.update.call_args[1]
+            self.assertEqual(kwargs['doc']['suggest'],
+                             {'input': ['库内标题', '新作者']})
+            self.assertNotIn('title', kwargs['doc'])  # 未传标题不得覆盖
+        self.assertEqual(resp.status_code, 200)
+
+    def test_doc_invalid_id_rejected(self):
+        from search.api_views import api_db_doc
+        resp = api_db_doc(self.factory.get('/api/admin/db/doc/a%20b/',
+                                           **self._auth()), 'a b')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_purge_confirm_mismatch_rejected(self):
+        """批量清理：confirm 与 source 不一致必须拒绝且不触发 delete_by_query。"""
+        from search.api_views import api_db_purge
+        with patch('search.api_views.client') as mock_client:
+            resp = api_db_purge(
+                self.factory.post('/api/admin/db/purge/',
+                                  data=json.dumps({'source': 'news_ithome',
+                                                   'confirm': 'wrong'}),
+                                  content_type='application/json', **self._auth()))
+            mock_client.delete_by_query.assert_not_called()
+        self.assertEqual(resp.status_code, 400)
+
+    def test_purge_success_deletes_and_verifies_residual(self):
+        """批量清理成功路径：先 refresh 再删，发现残余（爬虫写入窗口）自动补删。"""
+        from search.api_views import api_db_purge
+        with patch('search.api_views.client') as mock_client:
+            mock_client.count.return_value = {'count': 0}
+            mock_client.delete_by_query.return_value = {'deleted': 5}
+            resp = api_db_purge(
+                self.factory.post('/api/admin/db/purge/',
+                                  data=json.dumps({'source': 'smoke_test',
+                                                   'confirm': 'smoke_test'}),
+                                  content_type='application/json', **self._auth()))
+            mock_client.indices.refresh.assert_called_once()
+            self.assertEqual(mock_client.delete_by_query.call_count, 1)
+        data = json.loads(resp.content)
+        self.assertEqual(data['deleted'], 5)
+
+    def test_purge_retries_when_residual_found(self):
+        """首轮删除后 count 仍有残余时，应补删一轮并累计删除数。"""
+        from search.api_views import api_db_purge
+        with patch('search.api_views.client') as mock_client:
+            mock_client.count.side_effect = [{'count': 3}, {'count': 0}]
+            mock_client.delete_by_query.side_effect = [{'deleted': 10},
+                                                       {'deleted': 3}]
+            resp = api_db_purge(
+                self.factory.post('/api/admin/db/purge/',
+                                  data=json.dumps({'source': 'smoke_test',
+                                                   'confirm': 'smoke_test'}),
+                                  content_type='application/json', **self._auth()))
+            self.assertEqual(mock_client.delete_by_query.call_count, 2)
+        data = json.loads(resp.content)
+        self.assertEqual(data['deleted'], 13)
 
 
 class CronValidationTests(SimpleTestCase):

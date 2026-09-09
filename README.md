@@ -171,11 +171,15 @@ scrapy crawl douyin_hot
 | `/api/crawl/resumable/` | GET | 可恢复的中断任务（需管理员登录） |
 | `/api/crawl/spiders/` | GET | 可用爬虫列表（需管理员登录） |
 | `/api/crawl/schedule/` | GET/POST | 定时任务管理（需管理员登录） |
+| `/api/admin/db/overview/` | GET | 索引概览：文档数/大小/来源分布（需管理员登录） |
+| `/api/admin/db/docs/` | GET | 文档分页浏览（source/q/p 参数，需管理员登录） |
+| `/api/admin/db/doc/<id>/` | GET/PUT/DELETE | 单文档详情/编辑（字段白名单）/删除（需管理员登录） |
+| `/api/admin/db/purge/` | POST | 按来源批量清理（confirm 逐字确认，需管理员登录） |
 | `/api/img/` | GET | 图片代理（本地磁盘缓存） |
 
 ### 🔐 采集管理登录
 
-「采集管理」页仅管理员可用：未登录访问会跳转登录页（`/login`），登录有效期
+「采集管理」与「数据管理」页仅管理员可用：未登录访问会跳转登录页（`/login`），登录有效期
 12 小时（有效期内自动续期），后端重启后需重新登录。管理员账号配置在
 `XSearch/local_settings.py`（已加入 `.gitignore`，严禁提交真实账号，格式参考
 `local_settings.py.example`），也可用环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD`

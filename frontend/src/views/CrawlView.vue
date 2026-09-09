@@ -82,13 +82,40 @@
             <el-switch :model-value="row.enabled" size="small" @change="(v) => toggleSchedule(row.id, v)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80">
+        <el-table-column label="操作" width="110">
           <template #default="{ row }">
+            <el-button type="primary" size="small" link @click="openEditSchedule(row)">编辑</el-button>
             <el-button type="danger" size="small" link @click="removeSchedule(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-empty v-else description="暂无定时任务" :image-size="60" />
+
+      <!-- 编辑定时任务 -->
+      <el-dialog v-model="editDialog.visible" title="编辑定时任务" width="420px">
+        <el-form label-width="80px">
+          <el-form-item label="爬虫">
+            <el-select v-model="editDialog.spider" style="width: 100%">
+              <el-option v-for="s in spiders" :key="s.key" :label="s.label" :value="s.key" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Cron">
+            <el-input v-model="editDialog.cron" placeholder="分 时 日 月 周" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-button-group>
+              <el-button size="small" @click="editDialog.cron = '0 8 * * *'">每天8点</el-button>
+              <el-button size="small" @click="editDialog.cron = '10 8 * * *'">8:10</el-button>
+              <el-button size="small" @click="editDialog.cron = '20 8 * * *'">8:20</el-button>
+              <el-button size="small" @click="editDialog.cron = '0 */6 * * *'">每6小时</el-button>
+            </el-button-group>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="editDialog.visible = false">取消</el-button>
+          <el-button type="primary" :loading="editDialog.saving" @click="saveEditSchedule">保存</el-button>
+        </template>
+      </el-dialog>
 
       <!-- 触发历史 -->
       <div v-if="scheduleData.history?.length" class="history">
@@ -257,6 +284,39 @@ async function removeSchedule(jobId) {
     await refreshSchedule()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+// ---- 编辑定时任务 ----
+const editDialog = ref({ visible: false, saving: false, jobId: '', spider: '', cron: '' })
+
+function openEditSchedule(row) {
+  editDialog.value = {
+    visible: true, saving: false,
+    jobId: row.id, spider: row.spider, cron: row.cron || '',
+  }
+}
+
+async function saveEditSchedule() {
+  if (!editDialog.value.cron.trim()) {
+    ElMessage.warning('请填写 cron 表达式')
+    return
+  }
+  editDialog.value.saving = true
+  try {
+    const r = await api.scheduleUpdate(
+      editDialog.value.jobId, editDialog.value.cron.trim(), editDialog.value.spider)
+    if (r.ok) {
+      ElMessage.success('定时任务已更新')
+      editDialog.value.visible = false
+      await refreshSchedule()
+    } else {
+      ElMessage.warning(r.reason || '更新失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    editDialog.value.saving = false
   }
 }
 

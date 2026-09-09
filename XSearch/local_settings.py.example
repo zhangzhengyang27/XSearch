@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+"""本地私有配置模板：复制为同目录 local_settings.py 并填入真实值。
+
+cp local_settings.py.example local_settings.py
+
+local_settings.py 已加入 .gitignore，管理员账号等敏感信息不会进入版本库。
+也可改用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（本文件的配置优先级更高）。
+"""
+
+# 「采集管理」页登录账号
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "change-me"

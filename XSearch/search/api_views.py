@@ -7,14 +7,22 @@
     GET  /api/stats             数据概览（总量/来源分布/热搜词）
     POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
     GET  /api/crawl/status      采集状态 + 日志尾部
+    POST /api/auth/login        管理员登录（签发 token）
+    POST /api/auth/logout       退出登录（吊销 token）
+    「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
+    与「数据管理」接口（ES 文档浏览/编辑/删除/清理）均要求
+    X-Admin-Token（require_admin），见各视图装饰器。
 
 所有接口在 ES/Redis/LLM 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
 import functools
+import hmac
 import json
 import logging
 import math
 import os
+import secrets
+import threading
 import time
 
 from django.http import JsonResponse
@@ -22,7 +30,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, NotFoundError
 import redis
 
 from search.crawl_manager import crawl_manager, schedule_manager
@@ -59,6 +67,79 @@ def require_api_token(view):
             return JsonResponse({"error": "无效的 API Token"}, status=401)
         return view(request, *args, **kwargs)
     return wrapped
+
+
+# ---- 管理员登录（「采集管理」页鉴权）----
+# 账号配置在 local_settings.py / 环境变量（见 settings.py，不入 git）。
+# 登录成功签发内存态 token（进程重启即失效，需重新登录），前端以
+# X-Admin-Token 请求头携带；采集管理的查询/配置类接口均要求该 token。
+_ADMIN_TOKEN_TTL = 12 * 3600  # 登录有效期 12 小时（有效期内每次请求滑动续期）
+_admin_tokens = {}  # token -> 过期时间戳
+_admin_lock = threading.Lock()
+
+
+def _purge_expired_tokens():
+    """清理过期 token（须持 _admin_lock 调用）。"""
+    now = time.time()
+    for t in [t for t, exp in _admin_tokens.items() if exp <= now]:
+        _admin_tokens.pop(t, None)
+
+
+def require_admin(view):
+    """校验 X-Admin-Token：登录态有效则放行并滑动续期，否则返回 401。"""
+    @functools.wraps(view)
+    def wrapped(request, *args, **kwargs):
+        token = request.headers.get("X-Admin-Token", "")
+        with _admin_lock:
+            expiry = _admin_tokens.get(token, 0)
+            if token and expiry > time.time():
+                _admin_tokens[token] = time.time() + _ADMIN_TOKEN_TTL
+                return view(request, *args, **kwargs)
+            _purge_expired_tokens()
+        return JsonResponse({"error": "未登录或登录已过期", "code": "auth_required"},
+                            status=401)
+    return wrapped
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_login(request):
+    """管理员登录。body: {username, password} → {token, username}"""
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    username = (payload.get("username") or "").strip()
+    password = (payload.get("password") or "").strip()
+    admin_user = getattr(settings, "ADMIN_USERNAME", "")
+    admin_pass = getattr(settings, "ADMIN_PASSWORD", "")
+    if not admin_user or not admin_pass:
+        return JsonResponse(
+            {"error": "管理员账号未配置：请创建 XSearch/local_settings.py"
+                      "（参考 local_settings.py.example）"},
+            status=500)
+    # 常数时间比较，避免时序侧信道逐步猜解账号密码
+    user_ok = hmac.compare_digest(username.encode("utf-8"), admin_user.encode("utf-8"))
+    pass_ok = hmac.compare_digest(password.encode("utf-8"), admin_pass.encode("utf-8"))
+    if not (user_ok and pass_ok):
+        return JsonResponse({"error": "用户名或密码错误"}, status=401)
+    token = secrets.token_hex(32)
+    with _admin_lock:
+        _admin_tokens[token] = time.time() + _ADMIN_TOKEN_TTL
+        _purge_expired_tokens()
+    logger.info("管理员「%s」登录成功", admin_user)
+    return JsonResponse({"ok": True, "token": token, "username": admin_user,
+                         "expires_in": _ADMIN_TOKEN_TTL})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_logout(request):
+    """退出登录：吊销请求头中的 token。"""
+    token = request.headers.get("X-Admin-Token", "")
+    with _admin_lock:
+        _admin_tokens.pop(token, None)
+    return JsonResponse({"ok": True})
 
 
 def _record_search_keyword(query):
@@ -453,6 +534,7 @@ def api_crawl_start(request):
     return JsonResponse(result, status=status_code)
 
 
+@require_admin
 def api_crawl_resumable(request):
     """列出可恢复的爬虫任务（JOBDIR 列表）。"""
     return JsonResponse({"jobs": crawl_manager.list_resumable_jobs()})
@@ -462,6 +544,7 @@ def api_crawl_status(request):
     return JsonResponse(crawl_manager.status())
 
 
+@require_admin
 def api_crawl_history(request):
     """爬虫任务历史记录。"""
     try:
@@ -471,21 +554,25 @@ def api_crawl_history(request):
     return JsonResponse({"history": crawl_manager.history(limit=limit)})
 
 
+@require_admin
 def api_crawl_stats(request):
     """爬虫任务统计：按天/按爬虫统计、成功率。"""
     return JsonResponse(crawl_manager.stats())
 
 
+@require_admin
 def api_crawl_spiders(request):
     return JsonResponse({"spiders": crawl_manager.list_spiders()})
 
 
-# ---- 爬虫定时任务 API ----
+# ---- 爬虫定时任务 API（仅管理员） ----
+@require_admin
 def api_schedule_list(request):
     """列出所有定时任务 + 最近触发历史。"""
     return JsonResponse(schedule_manager.list())
 
 
+@require_admin
 @require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -512,6 +599,7 @@ def api_schedule_add(request):
     return JsonResponse(result, status=status_code)
 
 
+@require_admin
 @require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -527,6 +615,33 @@ def api_schedule_remove(request):
     return JsonResponse(schedule_manager.remove(job_id))
 
 
+@require_admin
+@require_api_token
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_schedule_update(request):
+    """更新定时任务。body: {job_id, cron?, spider?, pages?, js?}
+
+    未传的字段保持原值；cron 变更时做与添加时相同的三级校验。
+    """
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    job_id = (payload.get("job_id") or "").strip()
+    if not job_id:
+        return JsonResponse({"error": "缺少 job_id"}, status=400)
+    result = schedule_manager.update(
+        job_id,
+        cron=payload.get("cron"),
+        spider=payload.get("spider"),
+        pages=payload.get("pages"),
+        js=payload.get("js"),
+    )
+    return JsonResponse(result, status=200 if result.get("ok") else 400)
+
+
+@require_admin
 @require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -541,6 +656,213 @@ def api_schedule_toggle(request):
     if not job_id:
         return JsonResponse({"error": "缺少 job_id"}, status=400)
     return JsonResponse(schedule_manager.toggle(job_id, enabled))
+
+
+# ---- 数据管理（ES quotes 索引，仅管理员）----
+# 管理视角与 /api/search 的差异：不排除榜单来源（全量数据）、返回完整字段
+# （列表 content 截断，全文走详情）、可写可删。
+DB_DOC_EDITABLE_FIELDS = ("title", "content", "tags", "author")
+DB_PAGE_SIZE = 20
+
+
+def _valid_doc_id(doc_id):
+    """ES _id 基本合法性：非空、无空白字符、长度受限。"""
+    return bool(doc_id) and len(doc_id) <= 128 and not any(c.isspace() for c in doc_id)
+
+
+@require_admin
+@require_http_methods(["GET"])
+def api_db_overview(request):
+    """索引概览：文档总数、磁盘大小、各来源文档数分布。"""
+    try:
+        stats = client.indices.stats(index=INDEX)
+        primaries = stats["_all"]["primaries"]
+        resp = client.search(index=INDEX, query={"match_all": {}}, size=0,
+                             aggs={"by_source": {"terms": {"field": "source", "size": 30}}})
+    except Exception as e:
+        return _es_error(e)
+    return JsonResponse({
+        "total": primaries["docs"]["count"],
+        "size_bytes": primaries["store"]["size_in_bytes"],
+        "by_source": [{"key": b["key"], "count": b["doc_count"]}
+                      for b in resp["aggregations"]["by_source"]["buckets"]],
+    })
+
+
+@require_admin
+@require_http_methods(["GET"])
+def api_db_docs(request):
+    """文档分页浏览：来源筛选 + 关键词检索，按采集时间倒序。"""
+    source = request.GET.get("source", "").strip()
+    q = request.GET.get("q", "").strip()
+    try:
+        page = max(int(request.GET.get("p", "1")), 1)
+    except ValueError:
+        page = 1
+
+    must = [{"multi_match": {"query": q, "fields": ["title^2", "content"]}}] if q \
+        else [{"match_all": {}}]
+    try:
+        resp = client.search(
+            index=INDEX,
+            query={"bool": {"must": must,
+                            "filter": [{"term": {"source": source}}] if source else []}},
+            sort=[{"crawled_at": {"order": "desc", "missing": "_last"}}],
+            from_=(page - 1) * DB_PAGE_SIZE,
+            size=DB_PAGE_SIZE,
+        )
+    except Exception as e:
+        return _es_error(e)
+
+    total = resp["hits"]["total"]["value"]
+    items = []
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        item = {k: src.get(k) for k in ("title", "source", "author", "url",
+                                        "rating", "rank", "view_nums",
+                                        "praise_nums", "create_date")}
+        item["id"] = hit["_id"]
+        item["content"] = (src.get("content") or "")[:300]
+        item["crawled_at"] = (str(src.get("crawled_at") or "")).replace("T", " ")[:19]
+        items.append(item)
+    return JsonResponse({
+        "total": total, "page": page, "page_size": DB_PAGE_SIZE,
+        "page_nums": math.ceil(total / DB_PAGE_SIZE) if total else 0,
+        "items": items,
+    })
+
+
+def _db_doc_detail(doc_id):
+    try:
+        resp = client.get(index=INDEX, id=doc_id)
+    except NotFoundError:
+        return JsonResponse({"error": "文档不存在"}, status=404)
+    except Exception as e:
+        return _es_error(e)
+    data = dict(resp["_source"])
+    data["id"] = resp["_id"]
+    # 与列表接口保持同一展示格式（ISO 的 T 分隔换空格）
+    data["crawled_at"] = (str(data.get("crawled_at") or "")).replace("T", " ")[:19]
+    return JsonResponse(data)
+
+
+def _db_doc_update(request, doc_id):
+    """编辑文档：白名单字段 partial update（不覆盖其他字段）。
+
+    suggest 补全字段 input=[title, author]，因此标题或作者任一变化都要重建。
+    """
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    fields = {k: payload[k] for k in DB_DOC_EDITABLE_FIELDS if k in payload}
+    if not fields:
+        return JsonResponse(
+            {"error": "没有可更新的字段（允许：%s）" % "、".join(DB_DOC_EDITABLE_FIELDS)},
+            status=400)
+    if "title" in fields and not str(fields["title"]).strip():
+        return JsonResponse({"error": "标题不能为空"}, status=400)
+    if "title" in fields or "author" in fields:
+        try:
+            current = client.get(index=INDEX, id=doc_id, _source=["title", "author"])
+        except NotFoundError:
+            return JsonResponse({"error": "文档不存在"}, status=404)
+        except Exception as e:
+            return _es_error(e)
+        title = str(fields.get("title", current["_source"].get("title") or ""))
+        author = str(fields.get("author", current["_source"].get("author") or ""))
+        fields["suggest"] = {"input": [title, author]}
+    try:
+        client.update(index=INDEX, id=doc_id, doc=fields)
+    except NotFoundError:
+        return JsonResponse({"error": "文档不存在"}, status=404)
+    except Exception as e:
+        return _es_error(e)
+    return JsonResponse({"ok": True})
+
+
+def _db_doc_delete(doc_id):
+    try:
+        client.delete(index=INDEX, id=doc_id)
+    except NotFoundError:
+        return JsonResponse({"error": "文档不存在"}, status=404)
+    except Exception as e:
+        return _es_error(e)
+    return JsonResponse({"ok": True})
+
+
+@require_admin
+@csrf_exempt
+def api_db_doc(request, doc_id):
+    """单文档管理：GET 详情 / PUT 编辑 / DELETE 删除。
+
+    三种方法共用一个视图：Django 命中第一个路径即调用视图、不按 HTTP 方法
+    回退匹配，拆成同路径三个视图会让 PUT/DELETE 被 GET 视图直接 405。
+    """
+    if not _valid_doc_id(doc_id):
+        return JsonResponse({"error": "非法文档 ID"}, status=400)
+    if request.method == "GET":
+        return _db_doc_detail(doc_id)
+    if request.method == "PUT":
+        return _db_doc_update(request, doc_id)
+    if request.method == "DELETE":
+        return _db_doc_delete(doc_id)
+    return JsonResponse({"error": "不支持的方法"}, status=405)
+
+
+def _purge_rankings_cache(source):
+    """按来源精确清理榜单 Redis 缓存。
+
+    Redis db0 与其他项目共享，只允许 scan_iter 精确匹配 XSearch 自己的键。
+    """
+    patterns = ["rankings_news:{}:p*".format(source)]
+    if source in NEWS_SOURCES:
+        patterns.append("rankings_news:news:p*")  # 新闻聚合列表同样包含该来源
+    try:
+        for pattern in patterns:
+            keys = list(redis_cli.scan_iter(match=pattern, count=100))
+            if keys:
+                redis_cli.delete(*keys)
+    except Exception:
+        pass  # 清缓存失败不阻塞（60s TTL 自然过期兜底）
+
+
+@require_admin
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_db_purge(request):
+    """按来源批量清理文档（危险操作）。
+
+    body: {source, confirm} —— confirm 必须与 source 逐字一致，防误触。
+
+    ES 的 delete_by_query 只能命中"已刷新"的文档：爬虫刚写入、还在刷新窗口
+    （默认 1s）内的数据会躲过删除。因此先显式 refresh，删完再校验残余，
+    有残留（期间爬虫又写入）则补删一轮，保证"清空该来源"的承诺。
+    """
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    source = (payload.get("source") or "").strip()
+    confirm = (payload.get("confirm") or "").strip()
+    if not source:
+        return JsonResponse({"error": "缺少 source"}, status=400)
+    if confirm != source:
+        return JsonResponse({"error": "confirm 与 source 不一致，拒绝执行"}, status=400)
+    term = {"term": {"source": source}}
+    try:
+        client.indices.refresh(index=INDEX)
+        resp = client.delete_by_query(index=INDEX, query=term, refresh=True)
+        deleted = resp.get("deleted", 0)
+        if client.count(index=INDEX, query=term)["count"]:
+            resp = client.delete_by_query(index=INDEX, query=term, refresh=True)
+            deleted += resp.get("deleted", 0)
+    except Exception as e:
+        return _es_error(e)
+    if deleted:
+        _purge_rankings_cache(source)
+    logger.info("数据管理：来源「%s」清理 %d 条文档", source, deleted)
+    return JsonResponse({"ok": True, "deleted": deleted})
 
 
 # 图片代理：豆瓣/B站图床均有防盗链校验，由后端携带站内 Referer 拉取

@@ -435,6 +435,44 @@ class ScheduleManager(object):
                 pass
         return {"ok": job is not None}
 
+    def update(self, job_id, cron=None, spider=None, pages=None, js=None):
+        """更新定时任务配置（cron / 爬虫 / 参数），重新注册调度。
+
+        传 None 的字段保持原值；cron 变更时先校验再落盘。
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return {"ok": False, "reason": "任务不存在"}
+            if cron is not None:
+                cron = cron.strip()
+                cron_error = self._validate_cron(cron)
+                if cron_error:
+                    return {"ok": False, "reason": cron_error}
+                job["cron"] = cron
+            if spider is not None:
+                if spider not in SPIDERS:
+                    return {"ok": False, "reason": "未知爬虫: {}".format(spider)}
+                job["spider"] = spider
+                job["label"] = SPIDERS[spider]["label"]
+            if pages is not None:
+                try:
+                    job["pages"] = min(max(int(pages), 1), 20)
+                except (TypeError, ValueError):
+                    pass
+            if js is not None:
+                job["js"] = bool(js)
+            self._save()
+        scheduler = self._get_scheduler()
+        if scheduler:
+            try:
+                scheduler.remove_job(job_id)
+            except Exception:
+                pass
+            if job.get("enabled", True):
+                self._add_to_scheduler(job_id, job)
+        return {"ok": True}
+
     def toggle(self, job_id, enabled):
         """启用/禁用定时任务。"""
         with self._lock:

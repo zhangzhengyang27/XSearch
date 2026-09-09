@@ -21,8 +21,8 @@ class CorsMiddleware(object):
         if origin in self._allowed_origins():
             response["Access-Control-Allow-Origin"] = origin
             response["Vary"] = "Origin"
-            response["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token"
+            response["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, X-Admin-Token"
             response["Access-Control-Max-Age"] = "86400"
         return response
 

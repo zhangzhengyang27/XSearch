@@ -180,6 +180,18 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 # X-API-Token 匹配；留空表示不启用（本机开发态默认开放）
 API_TOKEN = os.getenv("API_TOKEN", "")
 
+# ---------- 管理员账号（「采集管理」页登录） ----------
+# 优先读环境变量，再由 XSearch/local_settings.py（已 gitignore，严禁提交）覆盖；
+# 两者都未配置时登录接口直接拒绝，采集管理不可用
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+_local_settings = os.path.join(BASE_DIR, "local_settings.py")
+if os.path.exists(_local_settings):
+    # 在模块全局命名空间中执行，覆盖上面的默认值
+    exec(compile(open(_local_settings, encoding="utf-8").read(),
+                 _local_settings, "exec"), globals())
+
 # ---------- 日志 ----------
 # 让 search 应用的 INFO 日志（调度器启动/任务清理等）输出到控制台；
 # 默认配置下非 django logger 的 INFO 会被丢弃，重启后看不到调度器启动记录

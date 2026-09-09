@@ -12,6 +12,9 @@ import AiDetailView from './views/AiDetailView.vue'
 import RankingsView from './views/RankingsView.vue'
 import StatsView from './views/StatsView.vue'
 import CrawlView from './views/CrawlView.vue'
+import DbAdminView from './views/DbAdminView.vue'
+import LoginView from './views/LoginView.vue'
+import { isAdmin } from './auth.js'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -24,7 +27,20 @@ const router = createRouter({
     { path: '/rankings', component: RankingsView },
     { path: '/stats', component: StatsView },
     { path: '/crawl', component: CrawlView },
+    { path: '/dbadmin', component: DbAdminView },
+    { path: '/login', component: LoginView },
   ],
+})
+
+// 管理页仅管理员可用：未登录跳登录页（登录后回到原地址）；已登录访问 /login 直接进采集管理
+const ADMIN_PATHS = ['/crawl', '/dbadmin']
+router.beforeEach((to) => {
+  if (ADMIN_PATHS.includes(to.path) && !isAdmin.value) {
+    return { path: '/login', query: { next: to.fullPath } }
+  }
+  if (to.path === '/login' && isAdmin.value) {
+    return { path: '/crawl' }
+  }
 })
 
 createApp(App).use(router).use(ElementPlus).mount('#app')
