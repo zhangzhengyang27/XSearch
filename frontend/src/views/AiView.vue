@@ -68,7 +68,8 @@
             <section v-for="(sec, si) in d.parsed.sections" :key="'s' + si" class="daily-section">
               <div class="section-label">{{ sec.label }}</div>
               <div v-for="(item, ii) in sec.items" :key="ii" class="daily-item">
-                <a :href="d.url" target="_blank" rel="noopener" class="item-title">{{ item.title }}</a>
+                <router-link :to="{ path: '/search', query: { q: item.title } }"
+                             class="item-title">{{ item.title }}</router-link>
                 <p v-if="item.summary" class="item-summary">{{ item.summary }}</p>
               </div>
             </section>
