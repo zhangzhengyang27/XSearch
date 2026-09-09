@@ -4,7 +4,7 @@
       <el-input
         v-model="query"
         size="large"
-        placeholder="搜新闻 / 文章 / 歌曲"
+        placeholder="搜新闻 / 文章"
         clearable
         @keyup.enter="doSearch(1)"
         :loading="loading"
@@ -75,25 +75,9 @@
       </div>
     </el-empty>
 
-    <!-- 网易云音乐：歌曲卡 -->
+    <!-- 掘金技术文章：文章卡 -->
     <article v-for="(r, i) in results" :key="i">
-      <div v-if="kind(r) === 'music'" class="card media-card">
-        <div class="music-icon">♪</div>
-        <div class="media-body">
-          <a :href="r.url" target="_blank" rel="noopener" class="card-title">
-            <span v-html="renderHighlight(r.title)"></span>
-            <el-tag size="small" effect="plain" type="success" class="src-tag">网易云音乐</el-tag>
-          </a>
-          <div class="card-meta">
-            <span v-if="r.author">🎤 {{ r.author }}</span>
-            <span v-if="r.duration">⏱ {{ Math.floor(r.duration/60) }}:{{ String(r.duration%60).padStart(2,'0') }}</span>
-          </div>
-          <p class="card-content" v-if="r.content" v-html="renderHighlight(r.content)"></p>
-        </div>
-      </div>
-
-      <!-- 掘金技术文章：文章卡 -->
-      <div v-else-if="kind(r) === 'article'" class="card generic-card">
+      <div v-if="kind(r) === 'article'" class="card generic-card">
         <a :href="r.url" target="_blank" rel="noopener" class="card-title">
           <span v-html="renderHighlight(r.title)"></span>
           <el-tag size="small" effect="plain" type="warning" class="src-tag">掘金文章</el-tag>
@@ -102,7 +86,7 @@
         <div class="card-meta"><span v-if="r.author">✍ {{ r.author }}</span></div>
       </div>
 
-      <!-- 通用（新闻/演示站等） -->
+      <!-- 通用（新闻等） -->
       <div v-else class="card generic-card">
         <a :href="r.url" target="_blank" rel="noopener" class="card-title">
           <span v-html="renderHighlight(r.title)"></span>
@@ -154,8 +138,8 @@ const DAY_OPTIONS = [
   { value: '30', label: '近30天' },
   { value: '90', label: '近90天' },
 ]
-// 实时 Tab（B站视频/网易云/掘金/全网聚合）不支持排序/分面参数
-const LIVE_TABS = new Set(['all', 'netease_music', 'juejin_article'])
+// 实时 Tab（掘金）不支持排序/分面参数
+const LIVE_TABS = new Set(['all', 'juejin_article'])
 const isLiveTab = computed(() => LIVE_TABS.has(source.value))
 
 const sourceLabel = (s) => SOURCE_NAMES[s] || s
@@ -166,11 +150,9 @@ const SOURCE_NAMES = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
 }
-// Tab 切换的来源列表（"全部"为空字符串走 ES 库内检索；"全网"为 all 走实时聚合）
+// Tab 切换的来源列表（"全部"为空字符串走 ES 库内检索；其余为实时源）
 const TAB_SOURCES = {
   '': '全部',
-  all: '全网(实时)',
-  netease_music: '网易云音乐',
   juejin_article: '掘金文章',
 }
 const PAGE_SIZE = 10  // 与后端 PAGE_SIZE 保持一致
@@ -182,7 +164,6 @@ function switchSource(key) {
 const kindLabel = (r) => SOURCE_NAMES[r.source] || r.source
 // 实体类型 -> 卡片模板
 const kind = (r) => {
-  if (r.source === 'netease_music') return 'music'
   if (r.source === 'juejin_article') return 'article'
   return 'generic'
 }
@@ -296,11 +277,6 @@ watch(() => route.query.q, (v) => {
 .card-content { font-size: 13.5px; color: var(--el-text-color-regular); line-height: 1.7; margin: 0; }
 :deep(.kw) { color: #d03050; font-weight: 600; }
 
-.music-icon {
-  width: 64px; height: 64px; border-radius: 10px; flex-shrink: 0;
-  background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff;
-  font-size: 30px; display: flex; align-items: center; justify-content: center;
-}
 .pager { display: flex; justify-content: center; margin-top: 20px; }
 .alt-suggest { margin-top: 4px; }
 .alt-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 10px; }

@@ -16,7 +16,7 @@
 ## 功能特性
 
 ### 🔍 搜索
-- 多源 Tab 切换（新闻 / 网易云音乐 / 掘金文章 / 全网实时聚合）
+- 多源 Tab 切换（新闻 / 掘金文章）
 - 搜索建议（ES completion）、容错纠错、排序切换、分面过滤
 - 分页 + 空页自动回退、空结果热搜词引导
 - 搜索结果 Redis 缓存 + 热搜词统计
@@ -47,7 +47,7 @@ coding-92/
 │   ├── search/                   # 搜索 + 爬虫管理 API
 │   │   ├── api_views.py          # 全部 API 接口
 │   │   ├── crawl_manager.py      # 爬虫进程管理 + 定时任务
-│   │   ├── live_sources.py       # 实时搜索源（网易云音乐/掘金）
+│   │   ├── live_sources.py       # 实时搜索源（掘金）
 │   │   └── models.py             # Django 模型
 │   ├── crawler/                  # Scrapy 爬虫（原 ArticleSpider，已合并）
 │   │   ├── spiders/              # 4 个爬虫
@@ -141,9 +141,6 @@ scrapy crawl aihot_hot
 
 # 采集抖音热点榜
 scrapy crawl douyin_hot
-
-# 采集演示站数据（10条）
-scrapy crawl quotes_ai -a pages=1
 ```
 
 也可以在前端「爬虫管理」页面一键启动。
@@ -156,7 +153,6 @@ scrapy crawl quotes_ai -a pages=1
 | `aihot_news` | AIHOT（aihot.news） | AI 精选动态（LLM 摘要+评分+入选理由，7 天窗口）+ 当日 AI 日报；`-a full=1` 拉全量动态 |
 | `aihot_hot` | AIHOT（aihot.news） | AI 热点榜 Top10（官方 v1 API，事件 AI 综述入 ES，榜单自动清理跌出项） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
-| `quotes_ai` | quotes.toscrape.com | 演示站：选择器快路径 + LLM 自愈兜底 + Playwright 渲染 |
 
 ## API 接口
 

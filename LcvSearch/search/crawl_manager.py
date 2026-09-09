@@ -37,7 +37,6 @@ SPIDERS = {
     "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
     "aihot_news":         {"scrapy_name": "aihot_news", "label": "AI资讯+日报(AIHOT)"},
     "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
-    "quotes_ai":          {"scrapy_name": "quotes_ai", "label": "演示站(教学)"},
 }
 
 
@@ -168,10 +167,6 @@ class CrawlManager(object):
 
             cmd = [sys.executable, "-m", "scrapy", "crawl", spec["scrapy_name"]]
             cmd += spec.get("extra_args", [])
-            if spider == "quotes_ai":
-                cmd += ["-a", "pages={}".format(pages)]
-                if js:
-                    cmd += ["-a", "js=1"]
             # 添加 JOBDIR 支持中断恢复
             cmd += ["-s", "JOBDIR={}".format(job_dir)]
             # 打开日志文件传给子进程，子进程继承 fd 后父进程立即关闭自己的句柄，

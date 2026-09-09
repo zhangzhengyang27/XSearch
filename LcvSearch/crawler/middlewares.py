@@ -7,7 +7,7 @@
 - PlaywrightFallbackMiddleware        : 渲染失败自动降级直连
 
 动态页面渲染不在这里做，走 scrapy-playwright：
-请求 meta={"playwright": True} 即可，见 spiders/quotes_ai.py。
+请求 meta={"playwright": True} 即可，见 spiders/douyin_hot.py。
 """
 import itertools
 import logging

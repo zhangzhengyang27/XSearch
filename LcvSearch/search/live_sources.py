@@ -80,36 +80,6 @@ _SESSION.headers.update({"User-Agent": _UA})
 RISK_HINT = {412: "B站 风控拦截", 418: "豆瓣风控拦截"}
 
 
-# ---------------------------------------------------------------- 网易云音乐
-def search_netease(query, page=1):
-    """网易云音乐歌曲搜索（来源 netease_music）。"""
-    resp = _SESSION.post(
-        "https://music.163.com/api/search/get/web",
-        data={"s": query, "type": 1, "offset": (page - 1) * 20, "limit": 20},
-        headers={"Referer": "https://music.163.com/"}, timeout=10).json()
-    songs = (resp.get("result") or {}).get("songs") or []
-
-    out = []
-    for rank, sg in enumerate(songs, 1):
-        artists = " / ".join(a.get("name", "") for a in sg.get("artists") or [])
-        album = (sg.get("album") or {}).get("name", "")
-        duration = int(sg.get("duration") or 0) // 1000
-        out.append({
-            "url_object_id": "netease_{}".format(sg.get("id")),
-            "title": sg.get("name") or "未知歌曲",
-            "content": "专辑：{}（{}）".format(album, artists) if album else artists,
-            "author": artists,
-            "tags": ["音乐"],
-            "url": "https://music.163.com/#/song?id={}".format(sg.get("id")),
-            "front_image_url": "",
-            "duration": duration,
-            "rank": rank,
-            "source": "netease_music",
-            "create_date": None,
-        })
-    return out
-
-
 # ---------------------------------------------------------------- 掘金文章
 def search_juejin(query, page=1):
     """掘金技术文章搜索（来源 juejin_article）。"""
@@ -143,7 +113,6 @@ def search_juejin(query, page=1):
 
 
 LIVE_SOURCES = {
-    "netease_music": search_netease,
     "juejin_article": search_juejin,
 }
 
@@ -220,7 +189,7 @@ def _relevance_score(item, query):
             score += 2.0
         if tok in content:
             score += 0.5
-    # 热度加权（B站视频有播放量，网易云有播放量）
+    # 热度加权（有播放量的来源）
     view_nums = item.get("view_nums") or item.get("play_count") or 0
     if isinstance(view_nums, (int, float)) and view_nums > 0:
         import math

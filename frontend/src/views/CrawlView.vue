@@ -10,12 +10,6 @@
             </el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="spider === 'quotes_ai'" label="抓取页数">
-          <el-slider v-model="pages" :min="1" :max="20" show-input style="max-width: 420px" />
-        </el-form-item>
-        <el-form-item v-if="spider === 'quotes_ai'" label="JS 渲染">
-          <el-switch v-model="js" active-text="Playwright 渲染 JS 页面" />
-        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="start" :loading="starting" :disabled="status.running">
             {{ status.running ? '任务运行中…' : '开始采集' }}
@@ -24,9 +18,6 @@
       </el-form>
       <div class="tip">
         采集的数据经管道写入 Elasticsearch quotes 索引，完成后即可在"搜索"和"数据概览"看到。
-        {{ spider === 'quotes_ai'
-          ? 'quotes_ai 为教学演示爬虫（quotes.toscrape.com）。'
-          : '该爬虫为固定任务，点击即开始。' }}
       </div>
     </el-card>
 
@@ -191,7 +182,6 @@ const spiders = ref([
   { key: 'aihot_hot', label: 'AI热点榜(AIHOT)' },
   { key: 'aihot_news', label: 'AI资讯+日报(AIHOT)' },
   { key: 'news_rss', label: '新闻RSS(4源)' },
-  { key: 'quotes_ai', label: '演示站(教学)' },
 ])
 const spider = ref('douyin_hot')
 const pages = ref(2)

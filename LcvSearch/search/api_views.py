@@ -5,7 +5,7 @@
     GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
     GET  /api/suggest?s=        搜索框补全
     GET  /api/stats             数据概览（总量/来源分布/热搜词）
-    POST /api/crawl/start       触发采集（子进程跑 quotes_ai）
+    POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
     GET  /api/crawl/status      采集状态 + 日志尾部
 
 所有接口在 ES/Redis/LLM 不可用时返回结构化错误（非 500），前端据此降级展示。
@@ -31,10 +31,9 @@ from search.live_sources import LIVE_SOURCES, search_live, search_all_sources
 # 从 Django settings 读取 ES/Redis 配置（支持环境变量覆盖），不再硬编码
 ES_URL = settings.ES_URL
 INDEX = settings.ES_INDEX
-# 不参与关键词搜索的来源：榜单类走 /api/rankings，演示站是教学数据
-# （quotes.toscrape.com 练习站）；bilibili_comments 为已下线功能的遗留数据
+# 不参与关键词搜索的来源：榜单类走 /api/rankings，AI 内容归 /ai 详情页
 RANKING_SOURCES = ("douyin_hot", "aihot_hot")
-SEARCH_EXCLUDED_SOURCES = RANKING_SOURCES + ("bilibili_comments", "quotes_ai")
+SEARCH_EXCLUDED_SOURCES = RANKING_SOURCES
 PAGE_SIZE = 10
 
 # 配置连接超时：ES/Redis 不可用时快速失败，避免每个请求长时间阻塞

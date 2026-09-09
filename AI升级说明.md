@@ -14,7 +14,6 @@ jobbole/拉勾/知乎老爬虫、fake-useragent）已全部移除，仓库只保
   ├─ aihot_news         AI 资讯+日报（AIHOT 官方 v1 API：精选动态带 LLM 摘要/评分/入选理由）
   ├─ aihot_hot          AI 热点榜（AIHOT 官方 v1 API，多信源印证事件 + AI 综述）
   ├─ douyin_hot         抖音热点榜 50 条（Playwright 渲染 + 页面文本解析）
-  ├─ quotes_ai          演示站：选择器快路径 + DeepSeek 自愈兜底 + Playwright 渲染
   ├─ 公共设施             scrapy-playwright 渲染 / browserforge 整组指纹头 / 住宅代理轮换
   └─ 入库               EsArticlePipeline -> Elasticsearch "quotes" 索引
                             └─> /api/search/  关键词搜索 + 搜索建议
@@ -48,11 +47,6 @@ pip install -r requirements.txt
 playwright install chromium   # 首次需要安装浏览器
 
 # ===== 爬虫试跑 =====
-
-# 演示站（quotes.toscrape.com）
-scrapy crawl quotes_ai -a pages=2        # 1. 选择器快路径
-scrapy crawl quotes_ai -a js=1           # 2. Playwright 渲染 JS 页
-scrapy crawl quotes_ai --set SELECTORS_DISABLED=1   # 3. 模拟改版，看 LLM 自愈（需 key）
 
 # 新闻 RSS 聚合（4 个官方源，配定时任务每天增量）
 scrapy crawl news_rss                           # 全部源
@@ -112,7 +106,7 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 
 ## 六、前端体验升级（参照同类开源项目形态）
 
-- **采集页对齐真实数据源**：可选 新闻RSS / AI热点榜 / 抖音热点 / 演示站
+- **采集页对齐真实数据源**：可选 新闻RSS / AI资讯日报 / AI热点榜 / 抖音热点
   （/api/crawl/spiders 白名单），不再与页面数据源脱节
 - **榜单页多源聚合**：AI 热点榜（AIHOT 多信源印证）、抖音热点榜（实时50条）
 - **新闻列表页**：4 源按发布时间倒序分页展示，可一键触发增量采集
