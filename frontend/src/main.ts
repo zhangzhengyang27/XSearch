@@ -17,7 +17,7 @@ import LoginView from './views/LoginView.vue'
 import { isAdmin } from './auth'
 
 const routes: RouteRecordRaw[] = [
-  { path: '/', redirect: '/search' },
+  { path: '/', redirect: '/ai' },
   { path: '/search', component: SearchView },
   { path: '/news', component: NewsView },
   { path: '/ai', component: AiView },

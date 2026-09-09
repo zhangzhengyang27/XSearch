@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <header class="header">
-      <div class="brand" @click="$router.push('/search')">
+      <div class="brand" @click="$router.push('/')">
         <span class="logo">X</span>Search
       </div>
       <el-menu mode="horizontal" :default-active="$route.path" router :ellipsis="false" class="nav">

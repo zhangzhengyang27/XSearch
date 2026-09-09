@@ -14,8 +14,10 @@
 #   DOCKER_BUILDKIT=0 docker build -f Dockerfile -t xsearch-backend:latest \
 #     --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
 #     --build-arg PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright .
-# 启动：
-#   docker compose --env-file env up -d --no-build
+# 注意：本文件必须放在仓库/NAS 部署目录【根目录】运行（NAS Synology 版 compose
+# 把相对路径按 compose 文件所在目录解析，放 deploy/ 会导致 ./data 与 env_file 全部错位）。
+# 启动（.env 放根目录，与 compose 同级）：
+#   docker compose -f docker-compose.prod.yml up -d --no-build
 
 name: xsearch
 
@@ -33,6 +35,14 @@ services:
         hard: -1
     volumes:
       - ./data/es:/usr/share/elasticsearch/data
+    # 健康检查 + backend 依赖门控：避免 backend/爬虫在 ES 就绪前启动
+    # （否则爬虫的 ES pipeline 连接超时，整轮数据不入库，2026-09-10 首发实测踩过）
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
     networks: [xsearch]
     restart: unless-stopped
 
@@ -42,21 +52,28 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks: [xsearch]
     restart: unless-stopped
 
   backend:
     image: xsearch-backend:latest
     container_name: xsearch-backend
-    env_file: env
+    env_file: .env
     environment:
       # Django 与 Scrapy 统一读 ES_URL（crawler/settings.py 会回退读它）
       - ES_URL=http://elasticsearch:9200
       - REDIS_URL=redis://redis:6379/0
       - TZ=Asia/Shanghai
     depends_on:
-      - elasticsearch
-      - redis
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./data/cache:/app/cache
       - ./data/jobs:/app/jobs
