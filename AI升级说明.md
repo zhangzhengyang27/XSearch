@@ -93,9 +93,9 @@ LcvSearch 已改造为**纯 JSON API 后端**，页面层由独立的 Vue 3 工�
 frontend/ (Vue3 + Vite + Element Plus, localhost:5173)
     /search   搜索（Tab切换/建议/分页）    ──┐
     /news     新闻列表（4源/时间倒序/分页） ─┤      LcvSearch API (Django, localhost:8000)
-    /stats    数据概览（总量/来源/热搜）───┤      /api/search /api/suggest /api/stats
+    /ai       AI（精选/日报/热点榜 三Tab）──┤      /api/search /api/suggest /api/stats
     /crawl    采集管理（触发+日志+定时任务）  ─┤      /api/crawl/* /api/rankings /api/img
-    /rankings 榜单（AI 热点榜/抖音热点榜）   ─┘
+    /rankings 榜单（抖音热点榜）             ─┘
 后端以子进程方式运行 Scrapy 爬虫（CrawlManager），数据经 ES 管道回流到搜索。
 ```
 

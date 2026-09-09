@@ -3,8 +3,6 @@
     <div class="toolbar">
       <el-tabs v-model="tab" @tab-change="() => load(1)">
         <el-tab-pane label="全部新闻" name="news" />
-        <el-tab-pane label="AI精选" name="aihot_news" />
-        <el-tab-pane label="AI日报" name="aihot_daily" />
         <el-tab-pane label="人民网" name="news_people" />
         <el-tab-pane label="中新网" name="news_chinanews" />
         <el-tab-pane label="IT之家" name="news_ithome" />
@@ -59,7 +57,6 @@ let pollTimer = null
 const SOURCE_NAMES = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
-  aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报',
 }
 const sourceName = (s) => SOURCE_NAMES[s] || s
 
@@ -81,11 +78,8 @@ async function load(p = 1) {
 
 async function recrawl() {
   starting.value = true
-  // AI精选/AI日报 Tab 触发 AIHOT 爬虫，其余触发 RSS 聚合
-  const spider = (tab.value === 'aihot_news' || tab.value === 'aihot_daily')
-    ? 'aihot_news' : 'news_rss'
   try {
-    const r = await api.crawlStart(spider, 1, false)
+    const r = await api.crawlStart('news_rss', 1, false)
     if (r.started) {
       ElMessage.success('新闻采集已启动，完成后点「刷新」查看')
       crawl.value.running = true

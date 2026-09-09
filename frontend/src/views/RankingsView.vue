@@ -2,7 +2,6 @@
   <div>
     <div class="toolbar">
       <el-tabs v-model="tab" @tab-change="load">
-        <el-tab-pane label="AI 热点榜" name="aihot_hot" />
         <el-tab-pane label="抖音热点榜" name="douyin_hot" />
       </el-tabs>
       <el-button size="small" @click="load" :loading="loading">刷新列表</el-button>
@@ -39,7 +38,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, formatNum } from '../api.js'
 
-const tab = ref('aihot_hot')
+const tab = ref('douyin_hot')
 const items = ref([])
 const loading = ref(false)
 const starting = ref(false)
@@ -49,7 +48,6 @@ const crawl = ref({ running: false })
 let pollTimer = null
 
 const CRAWL_SPIDER = {
-  aihot_hot: 'aihot_hot',
   douyin_hot: 'douyin_hot',
 }
 
@@ -60,8 +58,7 @@ async function load() {
   try {
     const d = await api.rankings(tab.value)
     items.value = d.items
-    if (tab.value === 'aihot_hot' && d.total) hint.value = 'AI 热点榜来自 AIHOT 聚合的 48 小时多信源印证事件（aihot.news），点击「更新榜单数据」采集最新'
-    else if (tab.value === 'douyin_hot' && d.total) hint.value = '抖音热点榜实时更新，点击「更新榜单数据」采集最新热点'
+    if (tab.value === 'douyin_hot' && d.total) hint.value = '抖音热点榜实时更新，点击「更新榜单数据」采集最新热点'
   } catch (e) {
     error.value = e.message
   } finally {

@@ -212,6 +212,16 @@ class ApiRankingsTests(TestCase):
         response = api_rankings(request)
         self.assertEqual(response.status_code, 400)
 
+    def test_ai_sources_accepted(self):
+        """AI 导航页三个来源都应合法，日报/热点榜保留全文。"""
+        for source, keep in (('aihot_daily', True), ('aihot_news', False), ('aihot_hot', True)):
+            request = self.factory.get('/api/rankings/', {'source': source})
+            with patch('search.api_views.client') as mock_client, \
+                    patch('search.api_views.redis_cli'):
+                mock_client.search.return_value = {'hits': {'total': {'value': 0}, 'hits': []}}
+                response = api_rankings(request)
+            self.assertEqual(response.status_code, 200)
+
 
 class CronValidationTests(SimpleTestCase):
     """定时任务 cron 表达式三级校验。"""

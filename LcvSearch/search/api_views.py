@@ -327,17 +327,22 @@ def api_stats(request):
     return JsonResponse(data)
 
 
-# 新闻来源：news_rss（4 个 RSS 源）+ AIHOT（精选动态 + 日报）
-NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot",
-                "aihot_news", "aihot_daily")
+# 新闻来源：news_rss 爬虫入库的 4 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
+NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
+# AI 来源：AIHOT 精选动态 / 日报 / 热点榜（独立 AI 导航页使用）
+AI_SOURCES = ("aihot_news", "aihot_daily", "aihot_hot")
 
 
-def _list_item(src):
-    """榜单/新闻列表条目的统一字段映射。"""
+def _list_item(src, keep_content=False):
+    """榜单/新闻列表条目的统一字段映射。
+
+    keep_content=True 时保留全文（AI 日报/热点榜页需要展示综述与日报正文），
+    否则截断为 150 字摘要。
+    """
     return {
         "rank": src.get("rank"),
         "title": src.get("title", ""),
-        "content": (src.get("content") or "")[:150],
+        "content": (src.get("content") or "")[:5000 if keep_content else 150],
         "url": src.get("url", ""),
         "author": src.get("author", ""),
         "source": src.get("source", ""),
@@ -363,10 +368,12 @@ def api_rankings(request):
         page = max(int(request.GET.get("p", "1")), 1)
     except ValueError:
         page = 1
-    if source not in RANKING_SOURCES and source != "news" and source not in NEWS_SOURCES:
+    if (source not in RANKING_SOURCES and source != "news"
+            and source not in NEWS_SOURCES and source not in AI_SOURCES):
         return JsonResponse({"error": "不支持的榜单来源"}, status=400)
 
-    if source == "news" or source in NEWS_SOURCES:
+    # 分页时间倒序分支：新闻 4 源聚合 + 各源 + AI 日报（aihot_hot 属榜单类，走下方 rank 分支）
+    if source == "news" or source in NEWS_SOURCES or source == "aihot_daily":
         page_size = 20
         # 新闻列表 60 秒缓存：页面轮询/翻页密集，且语料分钟级变化足够
         cache_key = "rankings_news:{}:p{}".format(source, page)
@@ -376,8 +383,10 @@ def api_rankings(request):
                 return JsonResponse(json.loads(raw))
         except Exception:
             pass
-        query = ({"terms": {"source": list(NEWS_SOURCES)}} if source == "news"
-                 else {"term": {"source": source}})
+        if source == "news":
+            query = {"terms": {"source": list(NEWS_SOURCES)}}
+        else:
+            query = {"term": {"source": source}}
         try:
             resp = client.search(
                 index=INDEX,
@@ -389,10 +398,12 @@ def api_rankings(request):
         except Exception as e:
             return _es_error(e)
         total = resp["hits"]["total"]["value"]
+        # AI 日报需要完整正文（正文即日报内容）
+        keep = source in AI_SOURCES
         payload = {
             "source": source, "total": total, "page": page,
             "page_nums": math.ceil(total / page_size) if total else 0,
-            "items": [_list_item(h["_source"]) for h in resp["hits"]["hits"]],
+            "items": [_list_item(h["_source"], keep_content=keep) for h in resp["hits"]["hits"]],
         }
         try:
             redis_cli.setex(cache_key, 60, json.dumps(payload, ensure_ascii=False))
@@ -405,12 +416,14 @@ def api_rankings(request):
             index=INDEX,
             query={"term": {"source": source}},
             sort=[{"rank": "asc"}],
-            size=300,  # 豆瓣 Top250 有 250 条，B站榜单通常 < 100 条
+            size=300,  # 榜单为"当前状态"全集（抖音 50 条 / AI 热点 10 条）
         )
     except Exception as e:
         return _es_error(e)
 
-    items = [_list_item(h["_source"]) for h in resp["hits"]["hits"]]
+    # AI 热点榜需要完整 AI 综述
+    items = [_list_item(h["_source"], keep_content=source in AI_SOURCES)
+             for h in resp["hits"]["hits"]]
     return JsonResponse({"source": source, "total": len(items), "items": items})
 
 

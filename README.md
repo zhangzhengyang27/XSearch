@@ -33,9 +33,10 @@
 - 抖音热点榜（50 条，实时）
 - 新闻列表（人民网 / 中新网 / IT之家 / Solidot / AIHOT 精选与日报，定时增量）
 
-### 🤖 AI 新闻（aihot.news 官方 API）
-- AI 精选动态：LLM 摘要 + 0-100 评分 + 入选理由，按 7 天窗口增量入库
-- AI 日报：每天 8 点发布的精编日报（头条 + 模型/产品/行业/论文/观点版块）
+### 🤖 AI 新闻（aihot.news 官方 API，独立「AI」导航）
+- AI 精选：LLM 摘要 + 0-100 评分 + 入选理由，按 7 天窗口增量入库
+- AI 日报：每天 8 点发布的精编日报（头条 + 模型/产品/行业/论文/观点版块），折叠阅读
+- AI 热点榜：48 小时多信源印证事件排行（含事件 AI 综述）
 
 ## 项目结构
 
@@ -65,9 +66,10 @@ coding-92/
 │   └── scrapy.cfg                # Scrapy 配置
 ├── frontend/                     # Vue3 前端
 │   ├── src/
-│   │   ├── views/                # 5 个页面
+│   │   ├── views/                # 6 个页面
 │   │   │   ├── SearchView.vue    # 搜索页
 │   │   │   ├── NewsView.vue      # 新闻列表页
+│   │   │   ├── AiView.vue        # AI 页（精选/日报/热点榜）
 │   │   │   ├── CrawlView.vue     # 爬虫管理页
 │   │   │   ├── RankingsView.vue  # 榜单页
 │   │   │   └── StatsView.vue     # 数据统计页
