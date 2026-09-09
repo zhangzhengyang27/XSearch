@@ -18,5 +18,9 @@ XSearch/schedules.json
 node_modules/
 frontend/dist/
 
+# 内部文档（审查报告 / 调研笔记，仅本地保留，不入库）
+代码审查报告.html
+前后端分离调研报告.md
+
 # macOS
 .DS_Store
