@@ -8,14 +8,14 @@ export const adminToken = ref(localStorage.getItem(TOKEN_KEY) || '')
 export const adminName = ref(localStorage.getItem(NAME_KEY) || '')
 export const isAdmin = computed(() => !!adminToken.value)
 
-export function setAuth(token, name) {
+export function setAuth(token: string, name?: string): void {
   adminToken.value = token
   adminName.value = name || '管理员'
   localStorage.setItem(TOKEN_KEY, token)
   localStorage.setItem(NAME_KEY, adminName.value)
 }
 
-export function clearAuth() {
+export function clearAuth(): void {
   adminToken.value = ''
   adminName.value = ''
   localStorage.removeItem(TOKEN_KEY)

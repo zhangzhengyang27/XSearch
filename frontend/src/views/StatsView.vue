@@ -36,22 +36,22 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, type StatsResult } from '../api'
 
-const data = ref({ es_ok: true, total: 0, by_source: [], top_keywords: [] })
+const data = ref<StatsResult>({ es_ok: true, total: 0, by_source: [], top_keywords: [] })
 const loading = ref(false)
 
-const SOURCE_NAMES = {
+const SOURCE_NAMES: Record<string, string> = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
   aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报',
   aihot_hot: 'AI热点榜', douyin_hot: '抖音热点榜',
 }
-const sourceName = (s) => SOURCE_NAMES[s] || s
+const sourceName = (s: string): string => SOURCE_NAMES[s] || s
 
-async function load() {
+async function load(): Promise<void> {
   loading.value = true
   try { data.value = await api.stats() } finally { loading.value = false }
 }

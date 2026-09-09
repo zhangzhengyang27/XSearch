@@ -148,56 +148,59 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, formatNum } from '../api.js'
+import {
+  api, formatNum, errText, type DbDocRow, type DbDocUpdateFields,
+  type DbDocsResult, type DbOverviewResult,
+} from '../api'
 
 // ---- 索引概览 ----
-const overview = ref({ total: 0, size_bytes: 0, by_source: [] })
+const overview = ref<DbOverviewResult>({ total: 0, size_bytes: 0, by_source: [] })
 
-async function loadOverview() {
+async function loadOverview(): Promise<void> {
   try {
     overview.value = await api.dbOverview()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
-function formatSize(bytes) {
+function formatSize(bytes: number): string {
   if (!bytes) return '0'
   return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' KB'
 }
 
 // ---- 文档浏览 ----
 const filters = reactive({ source: '', q: '' })
-const items = ref([])
+const items = ref<DbDocRow[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageNums = ref(0)
 const loading = ref(false)
 
-async function load(p = page.value) {
+async function load(p = page.value): Promise<void> {
   loading.value = true
   try {
-    const d = await api.dbDocs(filters.source, filters.q.trim(), p)
+    const d: DbDocsResult = await api.dbDocs(filters.source, filters.q.trim(), p)
     items.value = d.items
     total.value = d.total
     page.value = d.page
     pageNums.value = d.page_nums
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     loading.value = false
   }
 }
 
-function filterBySource(key) {
+function filterBySource(key: string): void {
   filters.source = filters.source === key ? '' : key
   load(1)
 }
 
-function resetFilters() {
+function resetFilters(): void {
   filters.source = ''
   filters.q = ''
   load(1)
@@ -205,23 +208,24 @@ function resetFilters() {
 
 // ---- 详情 / 编辑抽屉 ----
 const drawerVisible = ref(false)
-const doc = ref(null)
+const doc = ref<DbDocRow | null>(null)
 const editing = ref(false)
 const saving = ref(false)
 const editForm = reactive({ title: '', author: '', tagsStr: '', content: '' })
 
-async function openDetail(row) {
+async function openDetail(row: { id: string }): Promise<void> {
   try {
     doc.value = await api.dbDoc(row.id)
     editing.value = false
     drawerVisible.value = true
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
-function startEdit() {
+function startEdit(): void {
   const d = doc.value
+  if (!d) return
   editForm.title = d.title || ''
   editForm.author = d.author || ''
   editForm.tagsStr = Array.isArray(d.tags) ? d.tags.join(',') : (d.tags || '')
@@ -229,31 +233,33 @@ function startEdit() {
   editing.value = true
 }
 
-async function saveEdit() {
+async function saveEdit(): Promise<void> {
   if (!editForm.title.trim()) {
     ElMessage.warning('标题不能为空')
     return
   }
+  if (!doc.value) return
+  const fields: DbDocUpdateFields = {
+    title: editForm.title.trim(),
+    author: editForm.author.trim(),
+    tags: editForm.tagsStr.split(',').map(t => t.trim()).filter(Boolean),
+    content: editForm.content,
+  }
   saving.value = true
   try {
-    await api.dbDocUpdate(doc.value.id, {
-      title: editForm.title.trim(),
-      author: editForm.author.trim(),
-      tags: editForm.tagsStr.split(',').map(t => t.trim()).filter(Boolean),
-      content: editForm.content,
-    })
+    await api.dbDocUpdate(doc.value.id, fields)
     ElMessage.success('已保存')
     editing.value = false
     await openDetail({ id: doc.value.id })  // 重新拉取展示最新全文
     load()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     saving.value = false
   }
 }
 
-async function removeDoc(row) {
+async function removeDoc(row: DbDocRow): Promise<void> {
   try {
     await ElMessageBox.confirm(
       `确定删除「${row.title}」？此操作不可恢复`, '删除文档',
@@ -268,7 +274,7 @@ async function removeDoc(row) {
     loadOverview()
     load()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
@@ -277,7 +283,7 @@ const purgeSource = ref('')
 const purgeConfirm = ref('')
 const purging = ref(false)
 
-async function doPurge() {
+async function doPurge(): Promise<void> {
   try {
     await ElMessageBox.confirm(
       `将永久删除来源「${purgeSource.value}」的全部文档，不可恢复！`, '批量清理',
@@ -294,7 +300,7 @@ async function doPurge() {
     loadOverview()
     load(1)
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     purging.value = false
   }

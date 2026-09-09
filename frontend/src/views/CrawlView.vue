@@ -79,7 +79,7 @@
         <el-table-column label="创建时间" prop="created_at" width="170" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch :model-value="row.enabled" size="small" @change="(v) => toggleSchedule(row.id, v)" />
+            <el-switch :model-value="row.enabled" size="small" @change="(v: boolean | string | number) => toggleSchedule(row.id, v)" />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="110">
@@ -198,13 +198,16 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api } from '../api.js'
+import {
+  api, errText, type SpiderInfo, type CrawlStatusResult, type CrawlStatsResult,
+  type CrawlHistoryItem, type ScheduleJob, type ScheduleListResult,
+} from '../api'
 
 // 初始值包含完整列表（与后端 SPIDERS 配置一致），后端离线时仍可正常展示
-const spiders = ref([
+const spiders = ref<SpiderInfo[]>([
   { key: 'douyin_hot', label: '抖音热点榜' },
   { key: 'aihot_hot', label: 'AI热点榜(AIHOT)' },
   { key: 'aihot_news', label: 'AI资讯+日报(AIHOT)' },
@@ -215,19 +218,19 @@ const spider = ref('douyin_hot')
 const pages = ref(2)
 const js = ref(false)
 const starting = ref(false)
-const status = ref({ running: false, log_tail: [], started_at: null })
-let timer = null
+const status = ref<CrawlStatusResult>({ running: false, status: null, started_at: null, spider: null, log_tail: [] })
+let timer: ReturnType<typeof setTimeout> | undefined
 
-async function refresh() {
+async function refresh(): Promise<void> {
   try { status.value = await api.crawlStatus() } catch { /* 后端离线时静默 */ }
   schedule()
 }
-function schedule() {
+function schedule(): void {
   clearTimeout(timer)
   timer = setTimeout(refresh, status.value.running ? 2000 : 8000)
 }
 
-async function start() {
+async function start(): Promise<void> {
   starting.value = true
   try {
     const r = await api.crawlStart(spider.value, pages.value, js.value)
@@ -235,24 +238,24 @@ async function start() {
     else ElMessage.warning(r.reason || '启动失败')
     await refresh()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     starting.value = false
   }
 }
 
 // ---- 定时任务 ----
-const scheduleData = ref({ jobs: [], history: [], scheduler_active: true })
+const scheduleData = ref<ScheduleListResult>({ jobs: [], history: [], scheduler_active: true })
 const newSchedule = ref({ spider: 'douyin_hot', cron: '0 8 * * *' })
 const addingSchedule = ref(false)
 
-async function refreshSchedule() {
+async function refreshSchedule(): Promise<void> {
   try {
     scheduleData.value = await api.scheduleList()
   } catch { /* 后端离线时静默 */ }
 }
 
-async function addSchedule() {
+async function addSchedule(): Promise<void> {
   if (!newSchedule.value.cron.trim()) {
     ElMessage.warning('请填写 cron 表达式')
     return
@@ -271,33 +274,33 @@ async function addSchedule() {
       ElMessage.warning(r.reason || '添加失败')
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     addingSchedule.value = false
   }
 }
 
-async function removeSchedule(jobId) {
+async function removeSchedule(jobId: string): Promise<void> {
   try {
     await api.scheduleRemove(jobId)
     ElMessage.success('已删除')
     await refreshSchedule()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
 // ---- 编辑定时任务 ----
 const editDialog = ref({ visible: false, saving: false, jobId: '', spider: '', cron: '' })
 
-function openEditSchedule(row) {
+function openEditSchedule(row: ScheduleJob): void {
   editDialog.value = {
     visible: true, saving: false,
     jobId: row.id, spider: row.spider, cron: row.cron || '',
   }
 }
 
-async function saveEditSchedule() {
+async function saveEditSchedule(): Promise<void> {
   if (!editDialog.value.cron.trim()) {
     ElMessage.warning('请填写 cron 表达式')
     return
@@ -314,31 +317,31 @@ async function saveEditSchedule() {
       ElMessage.warning(r.reason || '更新失败')
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     editDialog.value.saving = false
   }
 }
 
-async function toggleSchedule(jobId, enabled) {
+async function toggleSchedule(jobId: string, enabled: boolean | string | number): Promise<void> {
   try {
     await api.scheduleToggle(jobId, enabled)
     await refreshSchedule()
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
 // ---- 任务统计与历史 ----
-const crawlStats = ref({ total: 0, completed: 0, failed: 0, running: 0, success_rate: 0, by_day: [], by_spider: [] })
-const crawlHistory = ref([])
+const crawlStats = ref<CrawlStatsResult>({ total: 0, completed: 0, failed: 0, empty: 0, running: 0, success_rate: 0, by_day: [], by_spider: [] })
+const crawlHistory = ref<CrawlHistoryItem[]>([])
 
-function spiderLabel(key) {
+function spiderLabel(key: string): string {
   const s = spiders.value.find(x => x.key === key)
   return s ? s.label : key
 }
 
-async function refreshStats() {
+async function refreshStats(): Promise<void> {
   try {
     crawlStats.value = await api.crawlStats()
     crawlHistory.value = (await api.crawlHistory(30)).history || []

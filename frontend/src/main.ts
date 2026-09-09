@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import App from './App.vue'
@@ -14,22 +14,24 @@ import StatsView from './views/StatsView.vue'
 import CrawlView from './views/CrawlView.vue'
 import DbAdminView from './views/DbAdminView.vue'
 import LoginView from './views/LoginView.vue'
-import { isAdmin } from './auth.js'
+import { isAdmin } from './auth'
+
+const routes: RouteRecordRaw[] = [
+  { path: '/', redirect: '/search' },
+  { path: '/search', component: SearchView },
+  { path: '/news', component: NewsView },
+  { path: '/ai', component: AiView },
+  { path: '/ai/detail', component: AiDetailView },
+  { path: '/rankings', component: RankingsView },
+  { path: '/stats', component: StatsView },
+  { path: '/crawl', component: CrawlView },
+  { path: '/dbadmin', component: DbAdminView },
+  { path: '/login', component: LoginView },
+]
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    { path: '/', redirect: '/search' },
-    { path: '/search', component: SearchView },
-    { path: '/news', component: NewsView },
-    { path: '/ai', component: AiView },
-    { path: '/ai/detail', component: AiDetailView },
-    { path: '/rankings', component: RankingsView },
-    { path: '/stats', component: StatsView },
-    { path: '/crawl', component: CrawlView },
-    { path: '/dbadmin', component: DbAdminView },
-    { path: '/login', component: LoginView },
-  ],
+  routes,
 })
 
 // 管理页仅管理员可用：未登录跳登录页（登录后回到原地址）；已登录访问 /login 直接进采集管理

@@ -48,27 +48,27 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api.js'
+import { api, errText, type DocItem } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const q = computed(() => String(route.query.q || '').trim())
 const loading = ref(false)
 const error = ref('')
-const items = ref([])
+const items = ref<DocItem[]>([])
 
-const best = computed(() => items.value[0] || null)
+const best = computed<DocItem | null>(() => items.value[0] || null)
 const related = computed(() => items.value.slice(1))
 
-const SOURCE_NAMES = {
+const SOURCE_NAMES: Record<string, string> = {
   aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报', aihot_hot: 'AI 热点榜',
 }
-const sourceName = (s) => SOURCE_NAMES[s] || s
+const sourceName = (s: string): string => SOURCE_NAMES[s] || s
 
-async function load() {
+async function load(): Promise<void> {
   if (!q.value) {
     items.value = []
     return
@@ -79,13 +79,13 @@ async function load() {
     const d = await api.aiItem(q.value)
     items.value = d.items || []
   } catch (e) {
-    error.value = e.message
+    error.value = errText(e)
   } finally {
     loading.value = false
   }
 }
 
-function back() {
+function back(): void {
   router.push({ path: '/ai' })
 }
 

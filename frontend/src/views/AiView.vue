@@ -40,7 +40,7 @@
     <!-- AI 热点榜：排名卡（多信源印证 + AI 综述） -->
     <template v-else-if="tab === 'hot'">
       <article v-for="it in items" :key="it.url" class="rank-card">
-        <div class="rank-no" :class="{ top: it.rank <= 3 }">{{ it.rank }}</div>
+        <div class="rank-no" :class="{ top: (it.rank ?? 99) <= 3 }">{{ it.rank }}</div>
         <div class="body">
           <router-link :to="{ path: '/ai/detail', query: { q: it.title } }"
                        class="title">{{ it.title }}</router-link>
@@ -91,13 +91,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api } from '../api.js'
+import { api, errText, type DocItem } from '../api'
 
 const tab = ref('selected')
-const items = ref([])
+const items = ref<DocItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageNums = ref(0)
@@ -105,22 +105,27 @@ const loading = ref(false)
 const error = ref('')
 const hint = ref('')
 const starting = ref(false)
-const crawl = ref({ running: false })
+const crawl = ref<{ running: boolean }>({ running: false })
 const openDaily = ref('')
-let pollTimer = null
+let pollTimer: ReturnType<typeof setTimeout> | undefined
 
-const TAB_SOURCE = { selected: 'aihot_news', daily: 'aihot_daily', hot: 'aihot_hot' }
-const HINTS = {
+const TAB_SOURCE: Record<string, string> = { selected: 'aihot_news', daily: 'aihot_daily', hot: 'aihot_hot' }
+const HINTS: Record<string, string> = {
   selected: 'AIHOT 自动聚合数百个信源，由 LLM 摘要并打分精选（aihot.news 官方 API）',
   daily: 'AIHOT 每天 8:00（北京时间）发布精编日报，点击日期展开全文',
   hot: '过去 48 小时内被多个独立信源共同印证的 AI 事件',
 }
 
+// 日报解析结果：头条 / 导语段落 / 版块条目 / 快讯
+interface DailyEntry { title: string; summary: string }
+interface DailySection { label: string; items: DailyEntry[] }
+interface DailyParsed { leadTitle: string; leadTexts: string[]; sections: DailySection[]; flashes: string[] }
+
 // 日报正文是爬虫按固定格式生成的文本块（头条：/【版块】/· 条目/缩进摘要/快讯：），
 // 在前端解析为结构化数据做富排版渲染
-function parseDaily(text) {
-  const out = { leadTitle: '', leadTexts: [], sections: [], flashes: [] }
-  let cur = null
+function parseDaily(text: string): DailyParsed {
+  const out: DailyParsed = { leadTitle: '', leadTexts: [], sections: [], flashes: [] }
+  let cur: DailySection | null = null
   for (const raw of (text || '').split('\n')) {
     const t = raw.trim()
     if (!t) continue
@@ -146,7 +151,7 @@ function parseDaily(text) {
 const parsedDailies = computed(() =>
   items.value.map(it => ({ ...it, parsed: parseDaily(it.content) })))
 
-async function load(p = 1) {
+async function load(p = 1): Promise<void> {
   loading.value = true
   error.value = ''
   hint.value = HINTS[tab.value] || ''
@@ -161,18 +166,13 @@ async function load(p = 1) {
       openDaily.value = items.value[0].create_date || items.value[0].title
     }
   } catch (e) {
-    error.value = e.message
+    error.value = errText(e)
   } finally {
     loading.value = false
   }
 }
 
-function onTab() {
-  items.value = []
-  load(1)
-}
-
-async function recrawl() {
+async function recrawl(): Promise<void> {
   starting.value = true
   // 热点榜走 aihot_hot 爬虫；精选与日报同属 aihot_news 爬虫
   const spider = tab.value === 'hot' ? 'aihot_hot' : 'aihot_news'
@@ -186,13 +186,13 @@ async function recrawl() {
       ElMessage.warning(r.reason || '启动失败')
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     starting.value = false
   }
 }
 
-async function poll() {
+async function poll(): Promise<void> {
   try {
     const s = await api.crawlStatus()
     crawl.value.running = s.running

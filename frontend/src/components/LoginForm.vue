@@ -14,20 +14,20 @@
   </el-form>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // 管理员登录表单：导航栏登录弹窗与 /login 登录页共用
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
-import { api } from '../api.js'
-import { setAuth } from '../auth.js'
+import { api, errText } from '../api'
+import { setAuth } from '../auth'
 
-const emit = defineEmits(['success'])
+const emit = defineEmits<{ success: [] }>()
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 
-async function submit() {
+async function submit(): Promise<void> {
   if (!username.value.trim() || !password.value) {
     ElMessage.warning('请输入账号和密码')
     return
@@ -39,7 +39,7 @@ async function submit() {
     ElMessage.success('登录成功')
     emit('success')
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     loading.value = false
   }

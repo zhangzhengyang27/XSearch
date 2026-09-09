@@ -1,4 +1,4 @@
-# XSearch 前端（Vue 3 + Vite + Element Plus）
+# XSearch 前端（Vue 3 + TypeScript + Vite + Element Plus）
 
 调用后端（XSearch Django API）的独立前端工程，四个视图：
 
@@ -21,9 +21,13 @@ npm run dev        # http://localhost:5173，已代理 /api 到 127.0.0.1:8000
 ## 生产构建
 
 ```bash
-npm run build      # 产物在 dist/，任意静态服务器可托管
+npm run build      # 先跑 vue-tsc 类型检查，再产出静态资源到 dist/
+npm run type-check # 仅类型检查（vue-tsc --noEmit）
 npm run preview    # 本地预览构建产物（4173 端口，已在后端 CORS 白名单）
 ```
+
+接口响应与文档条目的类型定义集中在 `src/api.ts`（DocItem / SearchResult 等），
+`import.meta.env` 的 VITE_ 变量类型在 `src/vite-env.d.ts`。
 
 跨域：开发态走 Vite 代理无需 CORS；直连部署时后端已开启白名单 CORS
 （settings.CORS_ALLOW_ORIGINS / 环境变量 FRONTEND_ORIGINS）。

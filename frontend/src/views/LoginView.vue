@@ -8,7 +8,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // 直达地址 /login（或 /crawl 未登录被守卫重定向）时的独立登录页
 import { useRoute, useRouter } from 'vue-router'
 import LoginForm from '../components/LoginForm.vue'
@@ -16,7 +16,7 @@ import LoginForm from '../components/LoginForm.vue'
 const route = useRoute()
 const router = useRouter()
 
-function onSuccess() {
+function onSuccess(): void {
   router.push(typeof route.query.next === 'string' ? route.query.next : '/crawl')
 }
 </script>

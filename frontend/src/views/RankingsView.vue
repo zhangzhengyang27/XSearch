@@ -17,7 +17,7 @@
     <el-empty v-if="!loading && !items.length" description="暂无数据，点右上角「更新榜单数据」采集" />
 
     <article v-for="it in items" :key="it.url" class="rank-card">
-      <div class="rank-no" :class="{ top: it.rank <= 3 }">{{ it.rank }}</div>
+      <div class="rank-no" :class="{ top: (it.rank ?? 99) <= 3 }">{{ it.rank }}</div>
       <div class="body">
         <a :href="it.url" target="_blank" rel="noopener" class="title">{{ it.title }}</a>
         <div class="meta">
@@ -33,25 +33,25 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, formatNum } from '../api.js'
+import { api, formatNum, errText, type DocItem } from '../api'
 
 const tab = ref('douyin_hot')
-const items = ref([])
+const items = ref<DocItem[]>([])
 const loading = ref(false)
 const starting = ref(false)
 const error = ref('')
 const hint = ref('')
-const crawl = ref({ running: false })
-let pollTimer = null
+const crawl = ref<{ running: boolean }>({ running: false })
+let pollTimer: ReturnType<typeof setTimeout> | undefined
 
-const CRAWL_SPIDER = {
+const CRAWL_SPIDER: Record<string, string> = {
   douyin_hot: 'douyin_hot',
 }
 
-async function load() {
+async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   hint.value = ''
@@ -60,13 +60,13 @@ async function load() {
     items.value = d.items
     if (tab.value === 'douyin_hot' && d.total) hint.value = '抖音热点榜实时更新，点击「更新榜单数据」采集最新热点'
   } catch (e) {
-    error.value = e.message
+    error.value = errText(e)
   } finally {
     loading.value = false
   }
 }
 
-async function recrawl() {
+async function recrawl(): Promise<void> {
   starting.value = true
   try {
     const r = await api.crawlStart(CRAWL_SPIDER[tab.value], 1, false)
@@ -78,13 +78,13 @@ async function recrawl() {
       ElMessage.warning(r.reason || '启动失败')
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     starting.value = false
   }
 }
 
-async function poll() {
+async function poll(): Promise<void> {
   try {
     const s = await api.crawlStatus()
     crawl.value.running = s.running

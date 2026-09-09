@@ -86,51 +86,54 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, renderHighlight } from '../api.js'
+import { api, renderHighlight, errText, type DocItem, type Facets } from '../api'
 
 const route = useRoute()
 
 const query = ref('')
 const source = ref('')
-const results = ref([])
+const results = ref<DocItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageNums = ref(0)
 const loading = ref(false)
 const searched = ref(false)
 const error = ref('')
-const suggestions = ref([])
-const hotWords = ref([])
+const suggestions = ref<string[]>([])
+const hotWords = ref<string[]>([])
 const sortBy = ref('relevance')
 const activeDays = ref('')
-const facets = ref({ sources: [], days: [] })
+const facets = ref<Facets>({ sources: [], days: [] })
 const corrected = ref('')
 const lastQuery = ref('')
 const fuzzyHit = ref(false)
 
-const DAY_OPTIONS = [
+const DAY_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: '全部' },
   { value: '7', label: '近7天' },
   { value: '30', label: '近30天' },
   { value: '90', label: '近90天' },
 ]
 
-const SOURCE_NAMES = {
+const SOURCE_NAMES: Record<string, string> = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
 }
 const PAGE_SIZE = 10  // 与后端 PAGE_SIZE 保持一致
 
-function switchSource(key) {
+function switchSource(key: string): void {
   source.value = key
   if (searched.value) doSearch(1)
 }
-const kindLabel = (r) => SOURCE_NAMES[r.source] || r.source
+function kindLabel(r: string | DocItem): string {
+  const s = typeof r === 'string' ? r : r.source
+  return SOURCE_NAMES[s] || s
+}
 
-let suggestTimer = null
+let suggestTimer: ReturnType<typeof setTimeout> | undefined
 let suggestSeq = 0  // 请求序号：防止旧请求的响应覆盖新结果（竞态条件）
 watch(query, () => {
   clearTimeout(suggestTimer)
@@ -150,7 +153,7 @@ watch(query, () => {
   }, 250)
 })
 
-async function doSearch(p = 1) {
+async function doSearch(p = 1): Promise<void> {
   if (!query.value.trim()) return
   loading.value = true
   error.value = ''
@@ -159,7 +162,7 @@ async function doSearch(p = 1) {
     const data = await api.search(query.value, p, source.value, sortBy.value, activeDays.value)
     // 分页 bug 修复：如果当前页返回 0 条结果且不是第 1 页，
     // 说明 ES 的 total 估算偏高导致出现空页，自动回退到第 1 页
-    if (p > 1 && (!data.results || data.results.length === 0)) {
+    if (p > 1 && data.results.length === 0) {
       loading.value = false
       doSearch(1)
       return
@@ -168,31 +171,31 @@ async function doSearch(p = 1) {
     total.value = data.total
     page.value = data.page
     hotWords.value = data.suggestions || []
-    facets.value = data.facets || { sources: [], days: [] }
+    facets.value = data.facets
     corrected.value = data.corrected || ''
     fuzzyHit.value = !!data.fuzzy && !data.corrected
     lastQuery.value = query.value
     // 分页 bug 修复：如果当前页结果数少于 PAGE_SIZE 且不是第 1 页，
     // 说明这是实际最后一页，修正 pageNums 避免出现空页
-    if (p > 1 && data.results && data.results.length < PAGE_SIZE) {
+    if (p > 1 && data.results.length < PAGE_SIZE) {
       pageNums.value = p
     } else {
       pageNums.value = data.page_nums
     }
     searched.value = true
   } catch (e) {
-    error.value = e.message
+    error.value = errText(e)
   } finally {
     loading.value = false
   }
 }
 
-function pick(s) {
+function pick(s: string): void {
   query.value = s
   doSearch(1)
 }
 
-function setDays(v) {
+function setDays(v: string): void {
   activeDays.value = activeDays.value === v ? '' : v
   if (searched.value) doSearch(1)
 }

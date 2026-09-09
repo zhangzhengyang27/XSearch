@@ -38,45 +38,45 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api } from '../api.js'
+import { api, errText, type DocItem, type RankingsResult } from '../api'
 
 const tab = ref('news')
-const items = ref([])
+const items = ref<DocItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageNums = ref(0)
 const loading = ref(false)
 const error = ref('')
 const starting = ref(false)
-const crawl = ref({ running: false })
-let pollTimer = null
+const crawl = ref<{ running: boolean }>({ running: false })
+let pollTimer: ReturnType<typeof setTimeout> | undefined
 
-const SOURCE_NAMES = {
+const SOURCE_NAMES: Record<string, string> = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
 }
-const sourceName = (s) => SOURCE_NAMES[s] || s
+const sourceName = (s: string): string => SOURCE_NAMES[s] || s
 
-async function load(p = 1) {
+async function load(p = 1): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const d = await api.rankings(tab.value, p)
+    const d: RankingsResult = await api.rankings(tab.value, p)
     items.value = d.items
     total.value = d.total
     page.value = d.page || p
     pageNums.value = d.page_nums || 0
   } catch (e) {
-    error.value = e.message
+    error.value = errText(e)
   } finally {
     loading.value = false
   }
 }
 
-async function recrawl() {
+async function recrawl(): Promise<void> {
   starting.value = true
   try {
     const r = await api.crawlStart('news_rss', 1, false)
@@ -88,13 +88,13 @@ async function recrawl() {
       ElMessage.warning(r.reason || '启动失败')
     }
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     starting.value = false
   }
 }
 
-async function poll() {
+async function poll(): Promise<void> {
   try {
     const s = await api.crawlStatus()
     crawl.value.running = s.running
