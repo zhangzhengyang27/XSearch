@@ -8,6 +8,7 @@ import './style.css'
 import SearchView from './views/SearchView.vue'
 import NewsView from './views/NewsView.vue'
 import AiView from './views/AiView.vue'
+import AiDetailView from './views/AiDetailView.vue'
 import RankingsView from './views/RankingsView.vue'
 import StatsView from './views/StatsView.vue'
 import CrawlView from './views/CrawlView.vue'
@@ -19,6 +20,7 @@ const router = createRouter({
     { path: '/search', component: SearchView },
     { path: '/news', component: NewsView },
     { path: '/ai', component: AiView },
+    { path: '/ai/detail', component: AiDetailView },
     { path: '/rankings', component: RankingsView },
     { path: '/stats', component: StatsView },
     { path: '/crawl', component: CrawlView },

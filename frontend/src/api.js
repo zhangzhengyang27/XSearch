@@ -30,6 +30,7 @@ export const api = {
     return request(`/api/suggest/?s=${encodeURIComponent(s)}`)
   },
   stats: () => request('/api/stats/'),
+  aiItem: (q) => request(`/api/ai/item/?q=${encodeURIComponent(q)}`),
   crawlStart: (spider, pages, js) => request('/api/crawl/start/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

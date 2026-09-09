@@ -7,7 +7,7 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.generic import View
 
-from search.api_views import (api_crawl_start, api_crawl_status,
+from search.api_views import (api_ai_item, api_crawl_start, api_crawl_status,
                               api_crawl_spiders, api_crawl_history, api_crawl_stats,
                               api_crawl_resumable,
                               api_img, api_rankings,
@@ -47,4 +47,5 @@ urlpatterns = [
     path('api/crawl/schedule/remove/', api_schedule_remove, name="api-schedule-remove"),
     path('api/crawl/schedule/toggle/', api_schedule_toggle, name="api-schedule-toggle"),
     path('api/img/', api_img, name="api-img"),
+    path('api/ai/item/', api_ai_item, name="api-ai-item"),
 ]

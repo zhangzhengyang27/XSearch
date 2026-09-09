@@ -125,7 +125,10 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, renderHighlight } from '../api.js'
+
+const route = useRoute()
 
 const query = ref('')
 const source = ref('')
@@ -250,6 +253,14 @@ function setDays(v) {
   activeDays.value = activeDays.value === v ? '' : v
   if (searched.value) doSearch(1)
 }
+
+// 支持 /search?q=xxx 深链接（AI 详情页等入口跳转进来自动执行搜索）
+watch(() => route.query.q, (v) => {
+  const term = String(v || '').trim()
+  if (!term) return
+  query.value = term
+  doSearch(1)
+}, { immediate: true })
 </script>
 
 <style scoped>

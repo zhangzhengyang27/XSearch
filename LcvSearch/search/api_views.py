@@ -333,6 +333,38 @@ NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
 AI_SOURCES = ("aihot_news", "aihot_daily", "aihot_hot")
 
 
+@require_http_methods(["GET"])
+def api_ai_item(request):
+    """AI 条目详情：按标题在本地 ES 中检索完整文档（AI 精选/日报/热点榜）。
+
+    供 /ai/detail 详情页使用——标题相关度排序，返回完整正文（不截断）。
+    """
+    q = request.GET.get("q", "").strip()
+    if not q:
+        return JsonResponse({"error": "缺少参数 q"}, status=400)
+    try:
+        resp = client.search(
+            index=INDEX,
+            query={"bool": {
+                "must": {"multi_match": {"query": q, "fields": ["title^3", "content"]}},
+                "filter": [{"terms": {"source": list(AI_SOURCES)}}],
+            }},
+            size=5,
+        )
+    except Exception as e:
+        return _es_error(e)
+    items = [{
+        "title": h["_source"].get("title", ""),
+        "content": h["_source"].get("content", ""),
+        "author": h["_source"].get("author", ""),
+        "source": h["_source"].get("source", ""),
+        "rating": h["_source"].get("rating"),
+        "url": h["_source"].get("url", ""),
+        "create_date": (h["_source"].get("create_date") or "")[:10],
+    } for h in resp["hits"]["hits"]]
+    return JsonResponse({"q": q, "total": len(items), "items": items})
+
+
 def _list_item(src, keep_content=False):
     """榜单/新闻列表条目的统一字段映射。
 

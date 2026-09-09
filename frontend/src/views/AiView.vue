@@ -21,7 +21,8 @@
     <!-- AI 精选：feed 流（LLM 摘要 + 评分） -->
     <template v-if="tab === 'selected'">
       <article v-for="it in items" :key="it.url" class="news-card">
-        <a :href="it.url" target="_blank" rel="noopener" class="title">{{ it.title }}</a>
+        <router-link :to="{ path: '/ai/detail', query: { q: it.title } }"
+                     class="title">{{ it.title }}</router-link>
         <div class="meta">
           <el-tag v-if="it.rating != null" size="small" effect="dark" type="warning"
                   class="score-tag">AI 评分 {{ it.rating }}</el-tag>
@@ -41,7 +42,8 @@
       <article v-for="it in items" :key="it.url" class="rank-card">
         <div class="rank-no" :class="{ top: it.rank <= 3 }">{{ it.rank }}</div>
         <div class="body">
-          <a :href="it.url" target="_blank" rel="noopener" class="title">{{ it.title }}</a>
+          <router-link :to="{ path: '/ai/detail', query: { q: it.title } }"
+                       class="title">{{ it.title }}</router-link>
           <div class="meta">
             <span v-if="it.view_nums != null">🔗 {{ it.view_nums }} 信源印证</span>
             <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
@@ -68,7 +70,7 @@
             <section v-for="(sec, si) in d.parsed.sections" :key="'s' + si" class="daily-section">
               <div class="section-label">{{ sec.label }}</div>
               <div v-for="(item, ii) in sec.items" :key="ii" class="daily-item">
-                <router-link :to="{ path: '/search', query: { q: item.title } }"
+                <router-link :to="{ path: '/ai/detail', query: { q: item.title } }"
                              class="item-title">{{ item.title }}</router-link>
                 <p v-if="item.summary" class="item-summary">{{ item.summary }}</p>
               </div>
