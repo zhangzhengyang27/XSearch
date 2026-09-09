@@ -187,10 +187,11 @@ import { api } from '../api.js'
 
 // 初始值包含完整列表（与后端 SPIDERS 配置一致），后端离线时仍可正常展示
 const spiders = ref([
-  { key: 'douyin_hot', label: '抖音热点榜', needs_bvid: false },
-  { key: 'aihot_hot', label: 'AI热点榜(AIHOT)', needs_bvid: false },
-  { key: 'news_rss', label: '新闻RSS(4源)', needs_bvid: false },
-  { key: 'quotes_ai', label: '演示站(教学)', needs_bvid: false },
+  { key: 'douyin_hot', label: '抖音热点榜' },
+  { key: 'aihot_hot', label: 'AI热点榜(AIHOT)' },
+  { key: 'aihot_news', label: 'AI资讯+日报(AIHOT)' },
+  { key: 'news_rss', label: '新闻RSS(4源)' },
+  { key: 'quotes_ai', label: '演示站(教学)' },
 ])
 const spider = ref('douyin_hot')
 const pages = ref(2)

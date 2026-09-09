@@ -327,8 +327,9 @@ def api_stats(request):
     return JsonResponse(data)
 
 
-# 新闻来源：news_rss 爬虫入库的 4 个 RSS 源
-NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
+# 新闻来源：news_rss（4 个 RSS 源）+ AIHOT（精选动态 + 日报）
+NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot",
+                "aihot_news", "aihot_daily")
 
 
 def _list_item(src):

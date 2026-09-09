@@ -47,6 +47,7 @@ const SOURCE_NAMES = {
   netease_music: '网易云音乐', juejin_article: '掘金文章',
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
+  aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报',
   aihot_hot: 'AI热点榜', douyin_hot: '抖音热点榜',
   quotes_ai: '演示站',
 }

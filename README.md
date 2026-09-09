@@ -31,7 +31,11 @@
 ### 📊 榜单
 - AI 热点榜（AIHOT 官方 API，事件 AI 综述）
 - 抖音热点榜（50 条，实时）
-- 新闻列表（人民网 / 中新网 / IT之家 / Solidot，RSS 定时增量）
+- 新闻列表（人民网 / 中新网 / IT之家 / Solidot / AIHOT 精选与日报，定时增量）
+
+### 🤖 AI 新闻（aihot.news 官方 API）
+- AI 精选动态：LLM 摘要 + 0-100 评分 + 入选理由，按 7 天窗口增量入库
+- AI 日报：每天 8 点发布的精编日报（头条 + 模型/产品/行业/论文/观点版块）
 
 ## 项目结构
 
@@ -147,6 +151,7 @@ scrapy crawl quotes_ai -a pages=1
 | 爬虫名 | 数据源 | 说明 |
 |---|---|---|
 | `news_rss` | 人民网 / 中新网 / IT之家 / Solidot | 新闻 RSS 聚合（官方源合规抓取，中新网自动跟进文章页抓正文；`-a sources=` 可选源） |
+| `aihot_news` | AIHOT（aihot.news） | AI 精选动态（LLM 摘要+评分+入选理由，7 天窗口）+ 当日 AI 日报；`-a full=1` 拉全量动态 |
 | `aihot_hot` | AIHOT（aihot.news） | AI 热点榜 Top10（官方 v1 API，事件 AI 综述入 ES，榜单自动清理跌出项） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
 | `quotes_ai` | quotes.toscrape.com | 演示站：选择器快路径 + LLM 自愈兜底 + Playwright 渲染 |

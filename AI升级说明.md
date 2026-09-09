@@ -11,6 +11,7 @@ jobbole/拉勾/知乎老爬虫、fake-useragent）已全部移除，仓库只保
 ```
 爬虫（Scrapy 2.13+，位于 LcvSearch/crawler/）
   ├─ news_rss           新闻 RSS 聚合（人民网/中新网/IT之家/Solidot，官方源合规抓取）
+  ├─ aihot_news         AI 资讯+日报（AIHOT 官方 v1 API：精选动态带 LLM 摘要/评分/入选理由）
   ├─ aihot_hot          AI 热点榜（AIHOT 官方 v1 API，多信源印证事件 + AI 综述）
   ├─ douyin_hot         抖音热点榜 50 条（Playwright 渲染 + 页面文本解析）
   ├─ quotes_ai          演示站：选择器快路径 + DeepSeek 自愈兜底 + Playwright 渲染
@@ -56,6 +57,10 @@ scrapy crawl quotes_ai --set SELECTORS_DISABLED=1   # 3. 模拟改版，看 LLM 
 # 新闻 RSS 聚合（4 个官方源，配定时任务每天增量）
 scrapy crawl news_rss                           # 全部源
 scrapy crawl news_rss -a sources=news_people    # 指定源
+
+# AI 资讯 + 日报（AIHOT 官方 API：精选动态带 LLM 摘要/评分，当日精编日报）
+scrapy crawl aihot_news                         # 精选（7 天窗口）
+scrapy crawl aihot_news -a full=1               # 全量动态（含未精选）
 
 # AI 热点榜（AIHOT 官方 API，匿名只读，限速 2 秒间隔）
 scrapy crawl aihot_hot

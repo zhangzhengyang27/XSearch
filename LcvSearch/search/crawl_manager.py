@@ -35,6 +35,7 @@ MAX_HISTORY = 200  # 最多保留 200 条历史记录
 SPIDERS = {
     "douyin_hot":         {"scrapy_name": "douyin_hot", "label": "抖音热点榜"},
     "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
+    "aihot_news":         {"scrapy_name": "aihot_news", "label": "AI资讯+日报(AIHOT)"},
     "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
     "quotes_ai":          {"scrapy_name": "quotes_ai", "label": "演示站(教学)"},
 }

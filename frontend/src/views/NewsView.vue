@@ -3,6 +3,8 @@
     <div class="toolbar">
       <el-tabs v-model="tab" @tab-change="() => load(1)">
         <el-tab-pane label="全部新闻" name="news" />
+        <el-tab-pane label="AI精选" name="aihot_news" />
+        <el-tab-pane label="AI日报" name="aihot_daily" />
         <el-tab-pane label="人民网" name="news_people" />
         <el-tab-pane label="中新网" name="news_chinanews" />
         <el-tab-pane label="IT之家" name="news_ithome" />
@@ -24,6 +26,7 @@
         <a :href="it.url" target="_blank" rel="noopener" class="title">{{ it.title }}</a>
         <div class="meta">
           <el-tag size="small" effect="plain" type="primary">{{ sourceName(it.source) }}</el-tag>
+          <span v-if="it.rating != null" class="score">⭐ AI评分 {{ it.rating }}</span>
           <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
         </div>
         <p class="desc" v-if="it.content">{{ it.content }}</p>
@@ -56,6 +59,7 @@ let pollTimer = null
 const SOURCE_NAMES = {
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
+  aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报',
 }
 const sourceName = (s) => SOURCE_NAMES[s] || s
 
@@ -77,8 +81,11 @@ async function load(p = 1) {
 
 async function recrawl() {
   starting.value = true
+  // AI精选/AI日报 Tab 触发 AIHOT 爬虫，其余触发 RSS 聚合
+  const spider = (tab.value === 'aihot_news' || tab.value === 'aihot_daily')
+    ? 'aihot_news' : 'news_rss'
   try {
-    const r = await api.crawlStart('news_rss', 1, false)
+    const r = await api.crawlStart(spider, 1, false)
     if (r.started) {
       ElMessage.success('新闻采集已启动，完成后点「刷新」查看')
       crawl.value.running = true
@@ -126,6 +133,7 @@ onUnmounted(() => clearTimeout(pollTimer))
 .title:hover { text-decoration: underline; }
 .meta { display: flex; gap: 12px; align-items: center; margin: 6px 0; }
 .dim { font-size: 12px; color: var(--el-text-color-secondary); }
+.score { font-size: 12px; color: #f7ba2a; }
 .desc { font-size: 13px; color: var(--el-text-color-regular); margin: 0; line-height: 1.7; }
 .pager { display: flex; justify-content: center; margin-top: 20px; }
 </style>
