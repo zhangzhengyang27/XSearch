@@ -37,6 +37,7 @@ SPIDERS = {
     "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
     "aihot_news":         {"scrapy_name": "aihot_news", "label": "AI资讯+日报(AIHOT)"},
     "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
+    "news_backfill":      {"scrapy_name": "news_backfill", "label": "新闻回填(中新网180天)"},
 }
 
 

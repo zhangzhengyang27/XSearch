@@ -182,6 +182,7 @@ const spiders = ref([
   { key: 'aihot_hot', label: 'AI热点榜(AIHOT)' },
   { key: 'aihot_news', label: 'AI资讯+日报(AIHOT)' },
   { key: 'news_rss', label: '新闻RSS(4源)' },
+  { key: 'news_backfill', label: '新闻回填(中新网180天)' },
 ])
 const spider = ref('douyin_hot')
 const pages = ref(2)

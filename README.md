@@ -33,7 +33,7 @@
 - 抖音热点榜（50 条，实时）
 - 新闻列表（人民网 / 中新网 / IT之家 / Solidot / AIHOT 精选与日报，定时增量）
 
-### 🤖 AI 新闻（aihot.news 官方 API，独立「AI」导航）
+### 🤖 AI 新闻（aihot.news 官方 API，独立「AI 讯息」导航）
 - AI 精选：LLM 摘要 + 0-100 评分 + 入选理由，按 7 天窗口增量入库
 - AI 日报：每天 8 点发布的精编日报（头条 + 模型/产品/行业/论文/观点版块），折叠阅读
 - AI 热点榜：48 小时多信源印证事件排行（含事件 AI 综述）
@@ -149,6 +149,7 @@ scrapy crawl douyin_hot
 | 爬虫名 | 数据源 | 说明 |
 |---|---|---|
 | `news_rss` | 人民网 / 中新网 / IT之家 / Solidot | 新闻 RSS 聚合（官方源合规抓取，中新网自动跟进文章页抓正文；`-a sources=` 可选源） |
+| `news_backfill` | 中新网存档 | 历史回填工具：按日期滚动存档页逐日抓标题（`-a days=180`），幂等可重复跑 |
 | `aihot_news` | AIHOT（aihot.news） | AI 精选动态（LLM 摘要+评分+入选理由，7 天窗口）+ 当日 AI 日报；`-a full=1` 拉全量动态 |
 | `aihot_hot` | AIHOT（aihot.news） | AI 热点榜 Top10（官方 v1 API，事件 AI 综述入 ES，榜单自动清理跌出项） |
 | `douyin_hot` | 抖音 | 热点榜 50 条（Playwright 渲染 + 文本解析） |
@@ -161,14 +162,24 @@ scrapy crawl douyin_hot
 | `/api/suggest/` | GET | 搜索建议 |
 | `/api/stats/` | GET | 数据概览统计 |
 | `/api/rankings/` | GET | 榜单/新闻列表数据（AI 热点榜/抖音榜 + 新闻 5 路） |
+| `/api/auth/login/` | POST | 管理员登录（签发 token，`X-Admin-Token` 请求头携带） |
+| `/api/auth/logout/` | POST | 退出登录（吊销 token） |
 | `/api/crawl/start/` | POST | 启动爬虫 |
 | `/api/crawl/status/` | GET | 爬虫运行状态 |
-| `/api/crawl/history/` | GET | 爬虫历史记录 |
-| `/api/crawl/stats/` | GET | 爬虫统计图表 |
-| `/api/crawl/resumable/` | GET | 可恢复的中断任务 |
-| `/api/crawl/spiders/` | GET | 可用爬虫列表 |
-| `/api/crawl/schedule/` | GET/POST | 定时任务管理 |
+| `/api/crawl/history/` | GET | 爬虫历史记录（需管理员登录） |
+| `/api/crawl/stats/` | GET | 爬虫统计图表（需管理员登录） |
+| `/api/crawl/resumable/` | GET | 可恢复的中断任务（需管理员登录） |
+| `/api/crawl/spiders/` | GET | 可用爬虫列表（需管理员登录） |
+| `/api/crawl/schedule/` | GET/POST | 定时任务管理（需管理员登录） |
 | `/api/img/` | GET | 图片代理（本地磁盘缓存） |
+
+### 🔐 采集管理登录
+
+「采集管理」页仅管理员可用：未登录访问会跳转登录页（`/login`），登录有效期
+12 小时（有效期内自动续期），后端重启后需重新登录。管理员账号配置在
+`XSearch/local_settings.py`（已加入 `.gitignore`，严禁提交真实账号，格式参考
+`local_settings.py.example`），也可用环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+配置（文件配置优先级更高）。
 
 ## 环境变量
 
@@ -187,6 +198,7 @@ scrapy crawl douyin_hot
 | `AI_LLM_MODEL` | `deepseek-v4-flash` | LLM 模型 |
 | `AI_PROXIES` | （空） | 住宅代理列表（逗号分隔） |
 | `API_TOKEN` | （空） | 设置后写操作与 AI 问答接口要求 `X-API-Token` 请求头（留空不启用） |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | （空） | 管理员账号（「采集管理」页登录），建议配置在 `XSearch/local_settings.py`（不入 git） |
 
 ## Docker 部署
 
@@ -213,7 +225,7 @@ cd XSearch
 python manage.py test search --verbosity=2
 ```
 
-9 个单元测试覆盖：API 参数校验、CORS 中间件、ES 异常降级等。
+单元测试覆盖：API 参数校验、CORS 中间件、管理员登录鉴权、ES 异常降级等。
 
 ## 发布清单（公网部署前）
 
