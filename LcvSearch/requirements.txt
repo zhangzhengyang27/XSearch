@@ -5,7 +5,6 @@ elasticsearch-dsl>=8,<9
 elasticsearch>=8,<9
 redis
 requests
-jieba                    # 统计页词频（词云数据）
 
 # ============ Scrapy 爬虫 ============
 scrapy>=2.13                       # start() 异步入口 / 新版中间件签名

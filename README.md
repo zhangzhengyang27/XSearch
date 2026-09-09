@@ -62,8 +62,9 @@ coding-92/
 │   └── scrapy.cfg                # Scrapy 配置
 ├── frontend/                     # Vue3 前端
 │   ├── src/
-│   │   ├── views/                # 4 个页面
+│   │   ├── views/                # 5 个页面
 │   │   │   ├── SearchView.vue    # 搜索页
+│   │   │   ├── NewsView.vue      # 新闻列表页
 │   │   │   ├── CrawlView.vue     # 爬虫管理页
 │   │   │   ├── RankingsView.vue  # 榜单页
 │   │   │   └── StatsView.vue     # 数据统计页

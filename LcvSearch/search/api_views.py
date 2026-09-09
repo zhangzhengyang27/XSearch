@@ -232,43 +232,8 @@ def api_suggest(request):
         return JsonResponse([], safe=False)
 
 
-_STOPWORDS = {"的", "了", "是", "在", "我", "有", "和", "就", "不", "人", "都", "一",
-              "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着",
-              "没有", "看", "好", "自己", "这", "那", "这个", "什么", "电影", "视频"}
-
-_KW_CACHE = {"at": 0.0, "data": []}
-
-
-def _word_freq(limit=40):
-    """标题+正文语料的中文词频（jieba），带 300 秒缓存。"""
-    if time.time() - _KW_CACHE["at"] < 300:
-        return _KW_CACHE["data"]
-    try:
-        resp = client.search(index=INDEX, query={"match_all": {}}, size=800,
-                             _source=["title", "content"])
-        texts = ["{} {}".format(h["_source"].get("title", ""),
-                                (h["_source"].get("content") or "")[:120])
-                 for h in resp["hits"]["hits"]]
-        from collections import Counter
-        import jieba
-        counter = Counter()
-        for t in texts:
-            for w in jieba.cut(t):
-                w = w.strip()
-                if len(w) >= 2 and w not in _STOPWORDS and not w.isdigit() \
-                        and not w.startswith(("http", "www")):
-                    counter[w] += 1
-        data = [{"w": w, "c": c} for w, c in counter.most_common(limit)]
-        _KW_CACHE["at"] = time.time()
-        _KW_CACHE["data"] = data
-        return data
-    except Exception:
-        return []
-
-
 def api_stats(request):
-    data = {"es_ok": True, "total": 0, "by_source": [], "top_keywords": [],
-            "keywords": []}
+    data = {"es_ok": True, "total": 0, "by_source": [], "top_keywords": []}
     try:
         resp = client.search(
             index=INDEX,
@@ -280,7 +245,6 @@ def api_stats(request):
         data["total"] = resp["hits"]["total"]["value"]
         data["by_source"] = [{"key": b["key"], "count": b["doc_count"]}
                              for b in resp["aggregations"]["by_source"]["buckets"]]
-        data["keywords"] = _word_freq()
     except Exception as e:
         data["es_ok"] = False
         data["es_error"] = str(e)[:200]
@@ -293,14 +257,66 @@ def api_stats(request):
     return JsonResponse(data)
 
 
-def api_rankings(request):
-    """榜单数据：B站热门/每周必看、豆瓣电影/图书 Top250。按排名排序的列表，无需关键词。
+# 新闻来源：news_rss 爬虫入库的 4 个 RSS 源
+NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
 
-    榜单是"当前状态"而非"查询对象"——前端点进来看列表，刷新按钮触发对应爬虫。
+
+def _list_item(src):
+    """榜单/新闻列表条目的统一字段映射。"""
+    return {
+        "rank": src.get("rank"),
+        "title": src.get("title", ""),
+        "content": (src.get("content") or "")[:150],
+        "url": src.get("url", ""),
+        "author": src.get("author", ""),
+        "source": src.get("source", ""),
+        "rating": src.get("rating"),
+        "front_image_url": src.get("front_image_url", ""),
+        "view_nums": src.get("view_nums"),
+        "praise_nums": src.get("praise_nums"),
+        "danmaku_nums": src.get("danmaku_nums"),
+        "reply_nums": src.get("reply_nums"),
+        "create_date": (src.get("create_date") or "")[:10],
+    }
+
+
+def api_rankings(request):
+    """榜单/新闻列表数据，无需关键词。
+
+    - 榜单（B站/豆瓣/抖音）：按 rank 升序，一次性拉全（百条级）
+    - 新闻（source=news 或具体新闻源）：按发布时间倒序 + 分页
+      （语料随定时任务持续增长，不能一次拉全）
     """
     source = request.GET.get("source", "bilibili_hot")
-    if source not in RANKING_SOURCES:
+    try:
+        page = max(int(request.GET.get("p", "1")), 1)
+    except ValueError:
+        page = 1
+    if source not in RANKING_SOURCES and source != "news" and source not in NEWS_SOURCES:
         return JsonResponse({"error": "不支持的榜单来源"}, status=400)
+
+    if source == "news" or source in NEWS_SOURCES:
+        page_size = 20
+        query = ({"terms": {"source": list(NEWS_SOURCES)}} if source == "news"
+                 else {"term": {"source": source}})
+        try:
+            resp = client.search(
+                index=INDEX,
+                query=query,
+                sort=[{"create_date": {"order": "desc", "missing": "_last"}}],
+                from_=(page - 1) * page_size,
+                size=page_size,
+            )
+        except Exception as e:
+            return _es_error(e)
+        total = resp["hits"]["total"]["value"]
+        items = [_list_item(h["_source"]) for h in resp["hits"]["hits"]]
+        return JsonResponse({
+            "source": source, "total": total, "page": page,
+            "page_nums": math.ceil(total / page_size) if total else 0,
+            "items": items,
+        })
+
     try:
         resp = client.search(
             index=INDEX,
@@ -311,23 +327,7 @@ def api_rankings(request):
     except Exception as e:
         return _es_error(e)
 
-    items = []
-    for hit in resp["hits"]["hits"]:
-        src = hit["_source"]
-        items.append({
-            "rank": src.get("rank"),
-            "title": src.get("title", ""),
-            "content": (src.get("content") or "")[:120],
-            "url": src.get("url", ""),
-            "author": src.get("author", ""),
-            "rating": src.get("rating"),
-            "front_image_url": src.get("front_image_url", ""),
-            "view_nums": src.get("view_nums"),
-            "praise_nums": src.get("praise_nums"),
-            "danmaku_nums": src.get("danmaku_nums"),
-            "reply_nums": src.get("reply_nums"),
-            "create_date": (src.get("create_date") or "")[:10],
-        })
+    items = [_list_item(h["_source"]) for h in resp["hits"]["hits"]]
     return JsonResponse({"source": source, "total": len(items), "items": items})
 
 

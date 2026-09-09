@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-新闻 RSS 聚合爬虫：抓官方 RSS 源写入 ES "quotes" 索引（可搜索、进词云）。
+新闻 RSS 聚合爬虫：抓官方 RSS 源写入 ES "quotes" 索引（可搜索）。
 
 RSS 是网站官方分发格式，抓取合规且无需对抗反爬。内置 4 个源（2026-09-09 实测可用）：
     news_people     人民网综合新闻   http://www.people.com.cn/rss/politics.xml  （feed 含摘要，约100条）
@@ -55,9 +55,18 @@ MAX_CONTENT_CHARS = 5000
 
 
 def strip_html(text):
-    """去掉 HTML 标签和实体，得到纯文本。"""
+    """去掉 script/style 块、HTML 标签和实体，得到纯文本。
+
+    人民网等站点的视频新闻会在 description 里嵌 <script> 播放器代码
+    （showPlayer(...)），必须整块删除，否则 JS 代码会混进正文。
+    """
     if not text:
         return ""
+    # 成对的 script/style/noscript 块连内容一起删
+    text = re.sub(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", "", text,
+                  flags=re.S | re.I)
+    # 未闭合/自闭合的残留开标签也删掉
+    text = re.sub(r"<(script|style|noscript)\b[^>]*/?>", "", text, flags=re.I)
     return unescape(re.sub(r"<[^>]+>", "", text)).strip()
 
 

@@ -43,7 +43,7 @@ export const api = {
   crawlStatus: () => request('/api/crawl/status/'),
   crawlHistory: (limit = 50) => request(`/api/crawl/history/?limit=${limit}`),
   crawlStats: () => request('/api/crawl/stats/'),
-  rankings: (source) => request(`/api/rankings/?source=${encodeURIComponent(source)}`),
+  rankings: (source, p = 1) => request(`/api/rankings/?source=${encodeURIComponent(source)}&p=${p}`),
   crawlSpiders: () => request('/api/crawl/spiders/'),
   // 定时任务
   scheduleList: () => request('/api/crawl/schedule/'),

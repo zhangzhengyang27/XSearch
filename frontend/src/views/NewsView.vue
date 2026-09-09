@@ -1,0 +1,131 @@
+<template>
+  <div>
+    <div class="toolbar">
+      <el-tabs v-model="tab" @tab-change="() => load(1)">
+        <el-tab-pane label="全部新闻" name="news" />
+        <el-tab-pane label="人民网" name="news_people" />
+        <el-tab-pane label="中新网" name="news_chinanews" />
+        <el-tab-pane label="IT之家" name="news_ithome" />
+        <el-tab-pane label="Solidot" name="news_solidot" />
+      </el-tabs>
+      <el-button size="small" @click="load(page)" :loading="loading">刷新</el-button>
+      <el-button size="small" type="primary" @click="recrawl" :loading="starting"
+                 :disabled="crawl.running">
+        {{ crawl.running ? '采集中…' : '采集最新新闻' }}
+      </el-button>
+    </div>
+
+    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="block" />
+    <el-empty v-if="!loading && !items.length"
+              description="暂无新闻，点右上角「采集最新新闻」抓取" />
+
+    <article v-for="it in items" :key="it.url" class="news-card">
+      <div class="body">
+        <a :href="it.url" target="_blank" rel="noopener" class="title">{{ it.title }}</a>
+        <div class="meta">
+          <el-tag size="small" effect="plain" type="primary">{{ sourceName(it.source) }}</el-tag>
+          <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
+        </div>
+        <p class="desc" v-if="it.content">{{ it.content }}</p>
+      </div>
+    </article>
+
+    <div class="pager" v-if="pageNums > 1">
+      <el-pagination layout="prev, pager, next" :total="total" :page-size="20"
+                     :current-page="page" @current-change="load" />
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, onUnmounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { api } from '../api.js'
+
+const tab = ref('news')
+const items = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageNums = ref(0)
+const loading = ref(false)
+const error = ref('')
+const starting = ref(false)
+const crawl = ref({ running: false })
+let pollTimer = null
+
+const SOURCE_NAMES = {
+  news_people: '人民网', news_chinanews: '中新网',
+  news_ithome: 'IT之家', news_solidot: 'Solidot',
+}
+const sourceName = (s) => SOURCE_NAMES[s] || s
+
+async function load(p = 1) {
+  loading.value = true
+  error.value = ''
+  try {
+    const d = await api.rankings(tab.value, p)
+    items.value = d.items
+    total.value = d.total
+    page.value = d.page || p
+    pageNums.value = d.page_nums || 0
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function recrawl() {
+  starting.value = true
+  try {
+    const r = await api.crawlStart('news_rss', 1, false)
+    if (r.started) {
+      ElMessage.success('新闻采集已启动，完成后点「刷新」查看')
+      crawl.value.running = true
+      poll()
+    } else {
+      ElMessage.warning(r.reason || '启动失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    starting.value = false
+  }
+}
+
+async function poll() {
+  try {
+    const s = await api.crawlStatus()
+    crawl.value.running = s.running
+    if (!s.running) {
+      ElMessage.success(s.status === 'empty'
+        ? '采集结束但没有抓到数据，可能被目标站拦截'
+        : '采集完成，点「刷新」查看新数据')
+      return
+    }
+  } catch { /* 忽略轮询失败 */ }
+  pollTimer = setTimeout(poll, 3000)
+}
+
+onMounted(() => load(1))
+onUnmounted(() => clearTimeout(pollTimer))
+</script>
+
+<style scoped>
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.toolbar :deep(.el-tabs) { flex: 1; }
+.toolbar :deep(.el-tabs__header) { margin-bottom: 0; }
+.block { margin-bottom: 12px; }
+.news-card {
+  background: #fff; border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 10px;
+  transition: box-shadow .2s;
+}
+.news-card:hover { box-shadow: var(--el-box-shadow-light); }
+.title { font-size: 15px; font-weight: 600; color: var(--el-color-primary); text-decoration: none; }
+.title:hover { text-decoration: underline; }
+.meta { display: flex; gap: 12px; align-items: center; margin: 6px 0; }
+.dim { font-size: 12px; color: var(--el-text-color-secondary); }
+.desc { font-size: 13px; color: var(--el-text-color-regular); margin: 0; line-height: 1.7; }
+.pager { display: flex; justify-content: center; margin-top: 20px; }
+</style>

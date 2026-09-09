@@ -6,6 +6,7 @@
       </div>
       <el-menu mode="horizontal" :default-active="$route.path" router :ellipsis="false" class="nav">
         <el-menu-item index="/search">搜索</el-menu-item>
+        <el-menu-item index="/news">新闻</el-menu-item>
         <el-menu-item index="/rankings">榜单</el-menu-item>
         <el-menu-item index="/stats">数据概览</el-menu-item>
         <el-menu-item index="/crawl">采集管理</el-menu-item>

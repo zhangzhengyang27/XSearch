@@ -98,9 +98,10 @@ LcvSearch 已改造为**纯 JSON API 后端**，页面层由独立的 Vue 3 工�
 ```
 frontend/ (Vue3 + Vite + Element Plus, localhost:5173)
     /search   搜索（Tab切换/建议/分页）    ──┐
-    /stats    数据概览（总量/来源/热搜/词云）─┤      LcvSearch API (Django, localhost:8000)
-    /crawl    采集管理（触发+日志+定时任务）  ─┤      /api/search /api/suggest /api/stats
-    /rankings 榜单（抖音/B站/豆瓣 5个来源）   ─┘      /api/crawl/* /api/rankings /api/img
+    /news     新闻列表（4源/时间倒序/分页） ─┤      LcvSearch API (Django, localhost:8000)
+    /stats    数据概览（总量/来源/热搜）───┤      /api/search /api/suggest /api/stats
+    /crawl    采集管理（触发+日志+定时任务）  ─┤      /api/crawl/* /api/rankings /api/img
+    /rankings 榜单（抖音/B站/豆瓣 5个来源）   ─┘
 后端以子进程方式运行 Scrapy 爬虫（CrawlManager），数据经 ES 管道回流到搜索。
 ```
 
@@ -121,7 +122,6 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
   B站评论（气泡体），每类实体独立卡片模板；图床防盗链由后端 /api/img/ 白名单代理解决
 - **采集页对齐真实数据源**：可选 B站热门/每周必看/豆瓣电影/豆瓣图书/抖音热点/演示站
   （/api/crawl/spiders 白名单），不再与页面数据源脱节
-- **统计页词云**：语料高频词（jieba 分词，300s 缓存），字号随词频缩放
 - **榜单页多源聚合**：抖音热点榜（实时50条）、B站热门/每周必看、豆瓣电影/图书 Top250
 - **图片本地磁盘缓存**：豆瓣 Top250 等静态图片缓存到本地，首次 106ms → 缓存命中 1.5ms
 - 参考形态：Meilisearch instant-search、Perplexica、bilibili_CommentHunter
