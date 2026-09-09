@@ -1,4 +1,4 @@
-# LcvSearch — AI 时代的分布式爬虫与搜索引擎
+# XSearch — AI 时代的分布式爬虫与搜索引擎
 
 基于 Scrapy + Elasticsearch + Django + Vue3 的全栈搜索引擎项目，覆盖爬虫采集、数据存储、关键词搜索、爬虫管理等完整链路。
 
@@ -42,8 +42,8 @@
 
 ```
 coding-92/
-├── LcvSearch/                    # Django 后端 + Scrapy 爬虫（合并后统一项目）
-│   ├── LcvSearch/                # Django 配置（settings / urls / wsgi）
+├── XSearch/                    # Django 后端 + Scrapy 爬虫（合并后统一项目）
+│   ├── XSearch/                # Django 配置（settings / urls / wsgi）
 │   ├── search/                   # 搜索 + 爬虫管理 API
 │   │   ├── api_views.py          # 全部 API 接口
 │   │   ├── crawl_manager.py      # 爬虫进程管理 + 定时任务
@@ -107,7 +107,7 @@ docker-compose up -d elasticsearch redis
 ### 3. 启动后端
 
 ```bash
-cd LcvSearch
+cd XSearch
 pip install -r requirements.txt
 playwright install chromium   # 首次需要安装浏览器
 
@@ -131,7 +131,7 @@ npm run dev
 ### 5. 采集数据
 
 ```bash
-cd LcvSearch
+cd XSearch
 
 # 采集新闻（人民网/中新网/IT之家/Solidot，4 源）
 scrapy crawl news_rss
@@ -210,7 +210,7 @@ docker-compose exec backend scrapy crawl news_rss
 ## 测试
 
 ```bash
-cd LcvSearch
+cd XSearch
 python manage.py test search --verbosity=2
 ```
 

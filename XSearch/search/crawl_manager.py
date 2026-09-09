@@ -21,7 +21,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# 爬虫已合并入 LcvSearch 项目，scrapy.cfg 位于项目根目录（LcvSearch/）
+# 爬虫已合并入 XSearch 项目，scrapy.cfg 位于项目根目录（XSearch/）
 SPIDER_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 LOG_DIR = os.path.join(BASE_DIR, "..", "logs")
 SCHEDULE_FILE = os.path.join(BASE_DIR, "..", "schedules.json")
@@ -149,7 +149,7 @@ class CrawlManager(object):
                 return {"started": False, "reason": "已有采集任务在运行",
                         "pid": self._proc.pid, "started_at": self._started_at}
             if not os.path.isdir(SPIDER_DIR):
-                return {"started": False, "reason": "找不到 LcvSearch 项目目录"}
+                return {"started": False, "reason": "找不到 XSearch 项目目录"}
 
             os.makedirs(LOG_DIR, exist_ok=True)
             os.makedirs(JOBS_DIR, exist_ok=True)

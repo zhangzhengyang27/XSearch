@@ -3,13 +3,13 @@
 老代码（Selenium/undetected-chromedriver、zheye/OpenCV 滑块、阿布云/西祠代理、
 jobbole/拉勾/知乎老爬虫、fake-useragent）已全部移除，仓库只保留 2026 年的常用方案。
 
-> **项目合并说明**：原 ArticleSpider 爬虫项目已合并入 LcvSearch，作为 `LcvSearch/crawler/` 子包。
-> 所有爬虫命令均在 `LcvSearch/` 目录下执行，scrapy.cfg 已配置好。
+> **项目合并说明**：原 ArticleSpider 爬虫项目已合并入 XSearch，作为 `XSearch/crawler/` 子包。
+> 所有爬虫命令均在 `XSearch/` 目录下执行，scrapy.cfg 已配置好。
 
 ## 一、技术栈与数据流
 
 ```
-爬虫（Scrapy 2.13+，位于 LcvSearch/crawler/）
+爬虫（Scrapy 2.13+，位于 XSearch/crawler/）
   ├─ news_rss           新闻 RSS 聚合（人民网/中新网/IT之家/Solidot，官方源合规抓取）
   ├─ aihot_news         AI 资讯+日报（AIHOT 官方 v1 API：精选动态带 LLM 摘要/评分/入选理由）
   ├─ aihot_hot          AI 热点榜（AIHOT 官方 v1 API，多信源印证事件 + AI 综述）
@@ -42,7 +42,7 @@ export AI_LLM_API_KEY="你的deepseek-key"
 
 ```bash
 # 进入项目目录（爬虫 + 后端统一在这里）
-cd LcvSearch
+cd XSearch
 pip install -r requirements.txt
 playwright install chromium   # 首次需要安装浏览器
 
@@ -81,12 +81,12 @@ export AI_PROXIES="http://user:pass@gate.provider.com:30001,http://user:pass@gat
 
 ## 五、前后端分离（2026-09 已实施）
 
-LcvSearch 已改造为**纯 JSON API 后端**，页面层由独立的 Vue 3 工程承担：
+XSearch 已改造为**纯 JSON API 后端**，页面层由独立的 Vue 3 工程承担：
 
 ```
 frontend/ (Vue3 + Vite + Element Plus, localhost:5173)
     /search   搜索（Tab切换/建议/分页）    ──┐
-    /news     新闻列表（4源/时间倒序/分页） ─┤      LcvSearch API (Django, localhost:8000)
+    /news     新闻列表（4源/时间倒序/分页） ─┤      XSearch API (Django, localhost:8000)
     /ai       AI（精选/日报/热点榜 三Tab）──┤      /api/search /api/suggest /api/stats
     /crawl    采集管理（触发+日志+定时任务）  ─┤      /api/crawl/* /api/rankings /api/img
     /rankings 榜单（抖音热点榜）             ─┘
@@ -98,7 +98,7 @@ frontend/ (Vue3 + Vite + Element Plus, localhost:5173)
 
 ```bash
 # 终端 1：后端 API
-cd LcvSearch && python manage.py migrate && python manage.py runserver 127.0.0.1:8000
+cd XSearch && python manage.py migrate && python manage.py runserver 127.0.0.1:8000
 # 终端 2：前端（开发态，Vite 已代理 /api 到 8000，免 CORS）
 cd frontend && npm install && npm run dev     # http://localhost:5173
 # 生产构建：npm run build（dist/ 纯静态可任意托管；npm run preview 本地预览）

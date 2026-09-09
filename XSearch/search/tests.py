@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LcvSearch 基础单元测试。
+XSearch 基础单元测试。
 
 覆盖：API 接口参数校验、CORS 中间件、
       搜索查询构建逻辑等不依赖外部服务（ES/Redis/LLM）的部分。
@@ -111,7 +111,7 @@ class CorsMiddlewareTests(TestCase):
 
     def test_allowed_origin_gets_cors_headers(self):
         """白名单内的 Origin 应获得 CORS 响应头。"""
-        from LcvSearch.middleware import CorsMiddleware
+        from xsearch.middleware import CorsMiddleware
         factory = RequestFactory()
         request = factory.get('/api/search/', HTTP_ORIGIN='http://localhost:5173')
 
@@ -126,7 +126,7 @@ class CorsMiddlewareTests(TestCase):
 
     def test_disallowed_origin_no_cors_headers(self):
         """非白名单 Origin 不应获得 CORS 响应头。"""
-        from LcvSearch.middleware import CorsMiddleware
+        from xsearch.middleware import CorsMiddleware
         factory = RequestFactory()
         request = factory.get('/api/search/', HTTP_ORIGIN='http://evil.com')
 
@@ -140,7 +140,7 @@ class CorsMiddlewareTests(TestCase):
 
     def test_options_request_returns_empty_response(self):
         """OPTIONS 预检请求应直接返回空响应（不调用视图）。"""
-        from LcvSearch.middleware import CorsMiddleware
+        from xsearch.middleware import CorsMiddleware
         factory = RequestFactory()
         request = factory.options('/api/search/', HTTP_ORIGIN='http://localhost:5173')
 

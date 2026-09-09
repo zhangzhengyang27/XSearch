@@ -1,4 +1,4 @@
-# LcvSearch 后端 Dockerfile
+# XSearch 后端 Dockerfile
 # Django + Scrapy + Playwright
 FROM python:3.12-slim
 
@@ -35,14 +35,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 安装 Python 依赖（锁定版本，保证构建可复现）
-COPY LcvSearch/requirements.txt LcvSearch/requirements-lock.txt ./
+COPY XSearch/requirements.txt XSearch/requirements-lock.txt ./
 RUN pip install --no-cache-dir -r requirements-lock.txt
 
 # 安装 Playwright 浏览器
 RUN playwright install chromium
 
 # 复制项目代码
-COPY LcvSearch/ .
+COPY XSearch/ .
 
 # 创建必要目录
 RUN mkdir -p cache/images jobs logs
@@ -59,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 # 注意：CrawlManager/ScheduleManager 是进程内单例（任务互斥、定时调度都依赖它），
 # 必须 --workers 1；多 worker 会导致状态互不可见、定时任务重复触发。
 # 需要横向扩容时先把任务状态外置到 Redis/DB，再增加 worker。
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn LcvSearch.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 120"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn xsearch.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 120"]

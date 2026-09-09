@@ -23,7 +23,7 @@ from datetime import datetime
 import scrapy
 
 API_BASE = "https://aihot.news"
-UA = "LcvSearch-crawler/1.0 (personal learning project)"
+UA = "XSearch-crawler/1.0 (personal learning project)"
 
 # 单页条数与最大翻页数（约 300 条/次，远够 7 天窗口）
 PAGE_LIMIT = 50

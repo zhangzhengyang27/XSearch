@@ -5,11 +5,11 @@ __pycache__/
 
 # Django / 运行时产物
 db.sqlite3
-LcvSearch/logs/
-LcvSearch/cache/
-LcvSearch/jobs/
-LcvSearch/crawl_history.json
-LcvSearch/schedules.json
+XSearch/logs/
+XSearch/cache/
+XSearch/jobs/
+XSearch/crawl_history.json
+XSearch/schedules.json
 
 # Node
 node_modules/

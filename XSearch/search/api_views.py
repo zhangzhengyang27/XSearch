@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """后端 JSON API（前后端分离改造后的唯一对外层）。
 
-路由（见 LcvSearch/urls.py）：
+路由（见 XSearch/urls.py）：
     GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
     GET  /api/suggest?s=        搜索框补全
     GET  /api/stats             数据概览（总量/来源分布/热搜词）

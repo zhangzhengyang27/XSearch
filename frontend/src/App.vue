@@ -2,7 +2,7 @@
   <div class="app">
     <header class="header">
       <div class="brand" @click="$router.push('/search')">
-        <span class="logo">Lcv</span>Search
+        <span class="logo">X</span>Search
       </div>
       <el-menu mode="horizontal" :default-active="$route.path" router :ellipsis="false" class="nav">
         <el-menu-item index="/search">搜索</el-menu-item>

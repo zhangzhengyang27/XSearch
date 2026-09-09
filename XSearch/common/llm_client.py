@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-统一的大模型客户端（合并自 ArticleSpider 和 LcvSearch 两个项目的 llm_client.py）。
+统一的大模型客户端（合并自 ArticleSpider 和 LcvSearch（现 XSearch）两个项目的 llm_client.py）。
 
 OpenAI 兼容协议，requests 直连，零 SDK 依赖。默认 DeepSeek。
 

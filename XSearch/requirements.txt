@@ -1,4 +1,4 @@
-# LcvSearch：Django 搜索站 + Scrapy 爬虫（合并后统一依赖）
+# XSearch：Django 搜索站 + Scrapy 爬虫（合并后统一依赖）
 # ============ Django 后端 ============
 django>=4.2
 elasticsearch-dsl>=8,<9

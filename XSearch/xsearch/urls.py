@@ -1,4 +1,4 @@
-"""LcvSearch URL Configuration —— 纯 API 后端（前端独立部署）。
+"""XSearch URL Configuration —— 纯 API 后端（前端独立部署）。
 
 页面层由 frontend/ 下的 Vue 3 + Vite 工程承担，本服务只提供 JSON API。
 """
@@ -20,7 +20,7 @@ class ServiceInfo(View):
     """服务自描述：前端启动时可据此检查后端是否在线。"""
     def get(self, request):
         return JsonResponse({
-            "service": "LcvSearch API",
+            "service": "XSearch API",
             "version": "2.1",
             "endpoints": ["/api/search", "/api/suggest", "/api/stats",
                           "/api/crawl/start", "/api/crawl/status",

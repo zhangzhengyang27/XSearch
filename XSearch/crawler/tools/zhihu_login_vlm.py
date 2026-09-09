@@ -25,7 +25,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 # 项目根目录加入 sys.path，使 crawler / common 包可导入
-# （本文件位于 LcvSearch/crawler/tools/，根目录是上两级 LcvSearch/）
+# （本文件位于 XSearch/crawler/tools/，根目录是上两级 XSearch/）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from crawler.ai.vlm_captcha import find_slider_gap, image_file_to_b64  # noqa: E402
 

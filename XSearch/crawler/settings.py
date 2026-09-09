@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Scrapy settings for LcvSearch 爬虫模块（原 ArticleSpider，已合并入 LcvSearch 项目）。
+Scrapy settings for XSearch 爬虫模块（原 ArticleSpider，已合并入 XSearch 项目）。
 
 技术栈：Scrapy 2.13+ / scrapy-playwright / browserforge 指纹 / 住宅代理 /
         DeepSeek LLM（语义抽取自愈 + RAG 问答）
@@ -8,7 +8,7 @@ Scrapy settings for LcvSearch 爬虫模块（原 ArticleSpider，已合并入 Lc
 import os
 import sys
 
-BOT_NAME = 'LcvSearchCrawler'
+BOT_NAME = 'XSearchCrawler'
 
 SPIDER_MODULES = ['crawler.spiders']
 NEWSPIDER_MODULE = 'crawler.spiders'
@@ -66,7 +66,7 @@ ES_HOSTS = [h.strip() for h in os.getenv(
 ES_INDEX = os.getenv("ES_INDEX", "quotes")
 
 # 让项目根目录加入 sys.path，使 crawler / common 包可被 Scrapy 导入
-# （settings 位于 LcvSearch/crawler/，根目录是上一级 LcvSearch/）
+# （settings 位于 XSearch/crawler/，根目录是上一级 XSearch/）
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)

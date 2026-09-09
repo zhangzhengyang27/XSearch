@@ -1,6 +1,6 @@
-# LcvSearch 前端（Vue 3 + Vite + Element Plus）
+# XSearch 前端（Vue 3 + Vite + Element Plus）
 
-调用后端（LcvSearch Django API）的独立前端工程，四个视图：
+调用后端（XSearch Django API）的独立前端工程，四个视图：
 
 | 路由 | 功能 | 调用接口 |
 |---|---|---|
@@ -16,7 +16,7 @@ npm install
 npm run dev        # http://localhost:5173，已代理 /api 到 127.0.0.1:8000
 ```
 
-后端先启动：`cd ../LcvSearch && python manage.py runserver 8000`
+后端先启动：`cd ../XSearch && python manage.py runserver 8000`
 
 ## 生产构建
 

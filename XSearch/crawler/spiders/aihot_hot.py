@@ -24,7 +24,7 @@ from scrapy import signals
 
 
 API_BASE = "https://aihot.news"
-UA = "LcvSearch-crawler/1.0 (personal learning project)"
+UA = "XSearch-crawler/1.0 (personal learning project)"
 
 
 class AihotHotSpider(scrapy.Spider):

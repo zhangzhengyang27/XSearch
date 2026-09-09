@@ -3,7 +3,7 @@
 把爬取结果写入 Elasticsearch（默认开启）。
 
 数据流：news_rss / aihot_hot 等爬虫 -> 本管道 -> ES "quotes" 索引
-        -> LcvSearch 关键词搜索（/search/）等 API 复用
+        -> XSearch 关键词搜索（/search/）等 API 复用
 
 启动时探测 ES：不可用则告警并跳过入库，不影响爬虫运行（大规模生产建议改批量写入）。
 """
@@ -57,7 +57,7 @@ ik_search_analyzer = analyzer("ik_smart_stop", tokenizer="ik_smart",
 
 
 class QuoteDocument(Document):
-    """通用文章/视频文档：字段与 LcvSearch 的检索面兼容。
+    """通用文章/视频文档：字段与 XSearch 的检索面兼容。
 
     中文文本字段使用 IK 分词（需 ES 安装 analysis-ik 插件）：
     建索引用 ik_max_word 细粒度，检索用 ik_smart + 停用词——中文搜索的标准组合，
