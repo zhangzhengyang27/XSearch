@@ -54,16 +54,33 @@
     <!-- AI 日报：折叠面板，按日期展开全文 -->
     <template v-else>
       <el-collapse accordion v-model="openDaily" class="daily-list">
-        <el-collapse-item v-for="it in items" :key="it.url" :name="it.create_date || it.title">
+        <el-collapse-item v-for="d in parsedDailies" :key="d.url"
+                          :name="d.create_date || d.title">
           <template #title>
-            <div class="daily-title">
-              <b>{{ it.title }}</b>
-              <span class="dim" v-if="it.create_date">{{ it.create_date }}</span>
+            <div class="daily-head">
+              <span class="daily-date">{{ d.create_date }}</span>
+              <span class="daily-lead" v-if="d.parsed.leadTitle">{{ d.parsed.leadTitle }}</span>
             </div>
           </template>
-          <div class="daily-body">{{ it.content }}</div>
-          <div class="daily-link">
-            <a :href="it.url" target="_blank" rel="noopener">在 AIHOT 查看原文页 →</a>
+          <div class="daily-body">
+            <p v-for="(p, i) in d.parsed.leadTexts" :key="'p' + i" class="lead-text">{{ p }}</p>
+
+            <section v-for="(sec, si) in d.parsed.sections" :key="'s' + si" class="daily-section">
+              <div class="section-label">{{ sec.label }}</div>
+              <div v-for="(item, ii) in sec.items" :key="ii" class="daily-item">
+                <a :href="d.url" target="_blank" rel="noopener" class="item-title">{{ item.title }}</a>
+                <p v-if="item.summary" class="item-summary">{{ item.summary }}</p>
+              </div>
+            </section>
+
+            <template v-if="d.parsed.flashes.length">
+              <div class="section-label">快讯</div>
+              <p v-for="(f, fi) in d.parsed.flashes" :key="'f' + fi" class="item-summary flash">{{ f }}</p>
+            </template>
+
+            <div class="daily-link">
+              <a :href="d.url" target="_blank" rel="noopener">在 AIHOT 查看原文页 →</a>
+            </div>
           </div>
         </el-collapse-item>
       </el-collapse>
@@ -72,7 +89,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api.js'
 
@@ -89,14 +106,42 @@ const crawl = ref({ running: false })
 const openDaily = ref('')
 let pollTimer = null
 
-// 各 Tab 对应的 ES source 与提示文案（信息架构参照 aihot.news：
-// 精选 feed / 日报阅读 / 热点榜排行 三种内容类型独立呈现）
 const TAB_SOURCE = { selected: 'aihot_news', daily: 'aihot_daily', hot: 'aihot_hot' }
 const HINTS = {
   selected: 'AIHOT 自动聚合数百个信源，由 LLM 摘要并打分精选（aihot.news 官方 API）',
   daily: 'AIHOT 每天 8:00（北京时间）发布精编日报，点击日期展开全文',
   hot: '过去 48 小时内被多个独立信源共同印证的 AI 事件',
 }
+
+// 日报正文是爬虫按固定格式生成的文本块（头条：/【版块】/· 条目/缩进摘要/快讯：），
+// 在前端解析为结构化数据做富排版渲染
+function parseDaily(text) {
+  const out = { leadTitle: '', leadTexts: [], sections: [], flashes: [] }
+  let cur = null
+  for (const raw of (text || '').split('\n')) {
+    const t = raw.trim()
+    if (!t) continue
+    if (t.startsWith('头条：') && !out.leadTitle) { out.leadTitle = t.slice(3).trim(); continue }
+    if (t.startsWith('快讯：')) { out.flashes.push(t.slice(3).trim()); continue }
+    const m = t.match(/^【(.+)】$/)
+    if (m) { cur = { label: m[1], items: [] }; out.sections.push(cur); continue }
+    if (t.startsWith('·')) {
+      if (!cur) { cur = { label: '动态', items: [] }; out.sections.push(cur) }
+      cur.items.push({ title: t.replace(/^·\s*/, ''), summary: '' })
+      continue
+    }
+    if (cur && cur.items.length) {
+      const last = cur.items[cur.items.length - 1]
+      last.summary = last.summary ? last.summary + ' ' + t : t
+    } else {
+      out.leadTexts.push(t)
+    }
+  }
+  return out
+}
+
+const parsedDailies = computed(() =>
+  items.value.map(it => ({ ...it, parsed: parseDaily(it.content) })))
 
 async function load(p = 1) {
   loading.value = true
@@ -108,6 +153,10 @@ async function load(p = 1) {
     total.value = d.total
     page.value = d.page || p
     pageNums.value = d.page_nums || 0
+    // 日报默认展开最新一期
+    if (tab.value === 'daily' && items.value.length) {
+      openDaily.value = items.value[0].create_date || items.value[0].title
+    }
   } catch (e) {
     error.value = e.message
   } finally {
@@ -186,12 +235,54 @@ onUnmounted(() => clearTimeout(pollTimer))
 .desc { font-size: 13px; color: var(--el-text-color-regular); margin: 0; line-height: 1.7; white-space: pre-wrap; }
 .pager { display: flex; justify-content: center; margin-top: 20px; }
 
+/* ---- AI 日报：卡片化折叠面板 + 结构化排版 ---- */
 .daily-list { border-top: none; }
-.daily-title { display: flex; gap: 12px; align-items: baseline; }
-.daily-body {
-  font-size: 13.5px; line-height: 1.9; white-space: pre-wrap;
-  color: var(--el-text-color-regular);
+.daily-list :deep(.el-collapse-item__header) {
+  background: #fff; border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px; padding: 6px 16px; margin-bottom: 10px;
+  height: auto; min-height: 52px; line-height: 1.5;
+  transition: box-shadow .2s;
 }
-.daily-link { margin-top: 10px; font-size: 12px; }
+.daily-list :deep(.el-collapse-item__header:hover) { box-shadow: var(--el-box-shadow-light); }
+.daily-list :deep(.el-collapse-item__wrap) {
+  background: #fff; border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px; margin-bottom: 10px;
+}
+.daily-list :deep(.el-collapse-item__content) { padding: 18px 20px; }
+.daily-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.daily-date {
+  flex-shrink: 0; font-weight: 700; font-size: 15px;
+  color: var(--el-text-color-primary);
+}
+.daily-lead {
+  font-size: 13px; color: var(--el-text-color-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.daily-body { font-size: 13.5px; }
+.lead-text {
+  margin: 0 0 14px; padding: 10px 14px;
+  background: var(--el-color-primary-light-9); border-radius: 8px;
+  color: var(--el-text-color-regular); line-height: 1.8;
+}
+.daily-section { margin-bottom: 18px; }
+.section-label {
+  font-size: 12px; font-weight: 700; color: var(--el-color-primary);
+  letter-spacing: 1px; margin-bottom: 10px;
+  padding-left: 8px; border-left: 3px solid var(--el-color-primary);
+  line-height: 1.2;
+}
+.daily-item { margin-bottom: 14px; }
+.item-title {
+  display: block; font-size: 14px; font-weight: 600;
+  color: var(--el-text-color-primary); text-decoration: none; line-height: 1.6;
+}
+.item-title:hover { color: var(--el-color-primary); }
+.item-summary {
+  margin: 4px 0 0; padding-left: 12px;
+  border-left: 2px solid var(--el-border-color-lighter);
+  font-size: 13px; color: var(--el-text-color-secondary); line-height: 1.8;
+}
+.item-summary.flash { margin-bottom: 8px; }
+.daily-link { margin-top: 4px; font-size: 12px; }
 .daily-link a { color: var(--el-color-primary); text-decoration: none; }
 </style>
