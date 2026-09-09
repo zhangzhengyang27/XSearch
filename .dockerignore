@@ -1,0 +1,18 @@
+# 后端镜像构建上下文裁剪：context = 仓库根目录，只应包含 XSearch/ 源码
+# 与 requirements。node_modules/dist/运行时目录绝不进构建上下文。
+.git
+.env
+.env.*
+frontend/node_modules
+frontend/dist
+XSearch/logs
+XSearch/jobs
+XSearch/cache
+XSearch/db.sqlite3
+XSearch/local_settings.py
+XSearch/crawl_history.json
+XSearch/schedules.json
+**/__pycache__
+**/*.pyc
+.DS_Store
+._*

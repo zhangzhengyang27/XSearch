@@ -2,6 +2,12 @@
 # Django + Scrapy + Playwright
 FROM python:3.12-slim
 
+# 可选构建参数：NAS 出网环境用（默认留空 = 官方源，CI 行为不变）
+#   PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+#   PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+ARG PIP_INDEX_URL=""
+ARG PLAYWRIGHT_DOWNLOAD_HOST=""
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -36,9 +42,10 @@ WORKDIR /app
 
 # 安装 Python 依赖（锁定版本，保证构建可复现）
 COPY XSearch/requirements.txt XSearch/requirements-lock.txt ./
-RUN pip install --no-cache-dir -r requirements-lock.txt
+RUN pip install --no-cache-dir -r requirements-lock.txt ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"}
 
-# 安装 Playwright 浏览器
+# 安装 Playwright 浏览器（下载源可用构建参数指向国内镜像）
+ENV PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
 RUN playwright install chromium
 
 # 复制项目代码

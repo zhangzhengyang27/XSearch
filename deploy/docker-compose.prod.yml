@@ -1,0 +1,86 @@
+# XSearch 生产部署 compose（NAS /volume1/docker/xsearch/docker-compose.yml）
+# 与仓库根 docker-compose.yml 的差别：
+#   1. ES / Redis / backend 不发布宿主端口，全部走内部网络——公网唯一入口是
+#      frontend 的 127.0.0.1:5600（frp xsearch-web → VPS Nginx → HTTPS）。
+#      NAS 上 9200/6379 已被共享 dev-stack 占用，也不能与宿主端口冲突。
+#   2. ES 用自带 IK 分词插件的 xsearch-es-ik:8.15.3（deploy/es-ik.Dockerfile 构建，
+#      与 NAS dev-es 同基础镜像版本，镜像已在 NAS 免拉取）。
+#   3. 前端为 nginx 卷挂 dist（Mac 构建产物），免 NAS 前端构建。
+#   4. 运行时状态全部 bind mount 到 ./data（SQLite / schedules.json /
+#      crawl_history.json / jobs / logs / cache / ES / Redis 数据）。
+#
+# 镜像构建（NAS 上，legacy builder，先于 up 执行）：
+#   DOCKER_BUILDKIT=0 docker build -f deploy/es-ik.Dockerfile -t xsearch-es-ik:8.15.3 .
+#   DOCKER_BUILDKIT=0 docker build -f Dockerfile -t xsearch-backend:latest \
+#     --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+#     --build-arg PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright .
+# 启动：
+#   docker compose --env-file env up -d --no-build
+
+name: xsearch
+
+services:
+  elasticsearch:
+    image: xsearch-es-ik:8.15.3
+    container_name: xsearch-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./data/es:/usr/share/elasticsearch/data
+    networks: [xsearch]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: xsearch-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks: [xsearch]
+    restart: unless-stopped
+
+  backend:
+    image: xsearch-backend:latest
+    container_name: xsearch-backend
+    env_file: env
+    environment:
+      # Django 与 Scrapy 统一读 ES_URL（crawler/settings.py 会回退读它）
+      - ES_URL=http://elasticsearch:9200
+      - REDIS_URL=redis://redis:6379/0
+      - TZ=Asia/Shanghai
+    depends_on:
+      - elasticsearch
+      - redis
+    volumes:
+      - ./data/cache:/app/cache
+      - ./data/jobs:/app/jobs
+      - ./data/logs:/app/logs
+      # 运行时状态：SQLite（会话等）/ 定时任务 / 爬虫历史，容器重建不丢
+      - ./data/db.sqlite3:/app/db.sqlite3
+      - ./data/schedules.json:/app/schedules.json
+      - ./data/crawl_history.json:/app/crawl_history.json
+    networks: [xsearch]
+    restart: unless-stopped
+
+  frontend:
+    image: nginx:1.27-alpine
+    container_name: xsearch-web
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    ports:
+      - "127.0.0.1:5600:80"
+    depends_on:
+      - backend
+    networks: [xsearch]
+    restart: unless-stopped
+
+networks:
+  xsearch:
+    driver: bridge
