@@ -34,7 +34,7 @@ def _default_es_url():
 
 
 # 模块级注册默认连接：本模块被两个进程复用（爬虫进程 open_spider 会按 settings
-# 重新注册；Django 实时联邦搜索进程则直接使用这里的默认注册）。
+# 重新注册；/api/ai/item 等直接使用原生客户端，不经此默认连接）。
 # 缺失时 dsl 报 "no connection with alias 'default'"（旧版 models.py 承担此职责）。
 # 加 try-except 保护：ES 不可用时不阻塞模块导入，由调用方自行降级。
 try:
@@ -143,7 +143,7 @@ class EsArticlePipeline(object):
 
 
 def index_item(item, source=None):
-    """把标准化 item 写入 ES（管道与实时联邦搜索共用）。失败返回 False。"""
+    """把标准化 item 写入 ES。失败返回 False。"""
     content = item.get("text") or item.get("content") or ""
     if not content:
         return False

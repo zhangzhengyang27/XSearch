@@ -16,7 +16,7 @@
 ## 功能特性
 
 ### 🔍 搜索
-- 多源 Tab 切换（新闻 / 掘金文章）
+- 搜索结果实体卡片（新闻来源标签）
 - 搜索建议（ES completion）、容错纠错、排序切换、分面过滤
 - 分页 + 空页自动回退、空结果热搜词引导
 - 搜索结果 Redis 缓存 + 热搜词统计
@@ -47,7 +47,6 @@ coding-92/
 │   ├── search/                   # 搜索 + 爬虫管理 API
 │   │   ├── api_views.py          # 全部 API 接口
 │   │   ├── crawl_manager.py      # 爬虫进程管理 + 定时任务
-│   │   ├── live_sources.py       # 实时搜索源（掘金）
 │   │   └── models.py             # Django 模型
 │   ├── crawler/                  # Scrapy 爬虫（原 ArticleSpider，已合并）
 │   │   ├── spiders/              # 4 个爬虫

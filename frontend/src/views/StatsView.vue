@@ -44,7 +44,6 @@ const data = ref({ es_ok: true, total: 0, by_source: [], top_keywords: [] })
 const loading = ref(false)
 
 const SOURCE_NAMES = {
-  juejin_article: '掘金文章',
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
   aihot_news: 'AIHOT 精选', aihot_daily: 'AIHOT 日报',

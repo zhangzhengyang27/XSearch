@@ -18,19 +18,8 @@
       </div>
     </div>
 
-    <!-- 来源 Tab 切换 -->
-    <div class="source-tabs" v-if="searched">
-      <div
-        v-for="(label, key) in TAB_SOURCES"
-        :key="key"
-        class="source-tab"
-        :class="{ active: source === key }"
-        @click="switchSource(key)"
-      >{{ label }}</div>
-    </div>
-
-    <!-- 排序 + 时间筛选（ES 库内检索时展示） -->
-    <div class="filter-bar" v-if="searched && !isLiveTab">
+    <!-- 排序 + 时间筛选 -->
+    <div class="filter-bar" v-if="searched">
       <div class="filter-group">
         <span class="filter-label">排序</span>
         <el-radio-group v-model="sortBy" size="small" @change="() => doSearch(1)">
@@ -48,11 +37,11 @@
     </div>
 
     <!-- 来源分面（计数来自当前查询的聚合，点击即筛选） -->
-    <div class="facet-bar" v-if="searched && !isLiveTab && facets.sources.length">
+    <div class="facet-bar" v-if="searched && facets.sources.length">
       <el-tag v-for="f in facets.sources" :key="f.key" effect="plain"
               :type="source === f.key ? 'primary' : 'info'"
               class="facet-tag" @click="switchSource(source === f.key ? '' : f.key)">
-        {{ sourceLabel(f.key) }} · {{ f.count }}
+        {{ kindLabel(f.key) }} · {{ f.count }}
       </el-tag>
     </div>
 
@@ -75,19 +64,9 @@
       </div>
     </el-empty>
 
-    <!-- 掘金技术文章：文章卡 -->
+    <!-- 通用结果卡（新闻等） -->
     <article v-for="(r, i) in results" :key="i">
-      <div v-if="kind(r) === 'article'" class="card generic-card">
-        <a :href="r.url" target="_blank" rel="noopener" class="card-title">
-          <span v-html="renderHighlight(r.title)"></span>
-          <el-tag size="small" effect="plain" type="warning" class="src-tag">掘金文章</el-tag>
-        </a>
-        <p class="card-content" v-html="renderHighlight(r.content)"></p>
-        <div class="card-meta"><span v-if="r.author">✍ {{ r.author }}</span></div>
-      </div>
-
-      <!-- 通用（新闻等） -->
-      <div v-else class="card generic-card">
+      <div class="card generic-card">
         <a :href="r.url" target="_blank" rel="noopener" class="card-title">
           <span v-html="renderHighlight(r.title)"></span>
           <el-tag v-if="r.source && r.source.startsWith('news_')" size="small"
@@ -108,7 +87,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, renderHighlight } from '../api.js'
 
@@ -138,22 +117,10 @@ const DAY_OPTIONS = [
   { value: '30', label: '近30天' },
   { value: '90', label: '近90天' },
 ]
-// 实时 Tab（掘金）不支持排序/分面参数
-const LIVE_TABS = new Set(['all', 'juejin_article'])
-const isLiveTab = computed(() => LIVE_TABS.has(source.value))
-
-const sourceLabel = (s) => SOURCE_NAMES[s] || s
 
 const SOURCE_NAMES = {
-  all: '全网搜索(实时)',
-  juejin_article: '掘金文章',
   news_people: '人民网', news_chinanews: '中新网',
   news_ithome: 'IT之家', news_solidot: 'Solidot',
-}
-// Tab 切换的来源列表（"全部"为空字符串走 ES 库内检索；其余为实时源）
-const TAB_SOURCES = {
-  '': '全部',
-  juejin_article: '掘金文章',
 }
 const PAGE_SIZE = 10  // 与后端 PAGE_SIZE 保持一致
 
@@ -162,11 +129,6 @@ function switchSource(key) {
   if (searched.value) doSearch(1)
 }
 const kindLabel = (r) => SOURCE_NAMES[r.source] || r.source
-// 实体类型 -> 卡片模板
-const kind = (r) => {
-  if (r.source === 'juejin_article') return 'article'
-  return 'generic'
-}
 
 let suggestTimer = null
 let suggestSeq = 0  // 请求序号：防止旧请求的响应覆盖新结果（竞态条件）
@@ -291,24 +253,4 @@ watch(() => route.query.q, (v) => {
 .filter-label { font-size: 12px; color: var(--el-text-color-secondary); }
 .facet-bar { margin-bottom: 12px; }
 .facet-tag { cursor: pointer; margin: 0 8px 6px 0; }
-
-/* 来源 Tab 切换 */
-.source-tabs {
-  display: flex; gap: 4px; margin-bottom: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  overflow-x: auto;
-}
-.source-tab {
-  padding: 8px 16px; cursor: pointer; font-size: 14px;
-  color: var(--el-text-color-secondary);
-  border-bottom: 2px solid transparent;
-  white-space: nowrap; transition: all .2s;
-  margin-bottom: -1px;
-}
-.source-tab:hover { color: var(--el-color-primary); }
-.source-tab.active {
-  color: var(--el-color-primary);
-  border-bottom-color: var(--el-color-primary);
-  font-weight: 600;
-}
 </style>

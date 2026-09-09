@@ -26,7 +26,6 @@ from elasticsearch import Elasticsearch
 import redis
 
 from search.crawl_manager import crawl_manager, schedule_manager
-from search.live_sources import LIVE_SOURCES, search_live, search_all_sources
 
 # 从 Django settings 读取 ES/Redis 配置（支持环境变量覆盖），不再硬编码
 ES_URL = settings.ES_URL
@@ -114,32 +113,6 @@ def api_search(request):
     if not query:
         return JsonResponse({"total": 0, "page": 1, "page_nums": 0, "results": []})
     _record_search_keyword(query)
-
-    if source in LIVE_SOURCES:
-        # 实时联邦搜索：现场调平台接口，结果同时后台写入 ES 累积语料
-        try:
-            items = search_live(source, query, page)
-        except Exception as e:
-            return JsonResponse({"error": "{} 搜索失败: {}".format(source, e)}, status=502)
-        results = [{k: v for k, v in it.items() if k != "create_date"} | {
-            "create_date": (str(it["create_date"])[:10] if it.get("create_date") else "")}
-            for it in items]
-        return JsonResponse({"total": len(results), "page": page, "page_nums": 1,
-                             "results": results, "live": True})
-
-    if source == "all":
-        # 多源聚合搜索：并发查所有实时源，合并后按相关度统一排序
-        try:
-            data = search_all_sources(query, page)
-        except Exception as e:
-            return JsonResponse({"error": "多源搜索失败: {}".format(e)}, status=502)
-        results = [{k: v for k, v in it.items() if k not in ("create_date", "_live_source")} | {
-            "create_date": (str(it["create_date"])[:10] if it.get("create_date") else "")}
-            for it in data["results"]]
-        return JsonResponse({"total": data["total"], "page": data["page"],
-                             "page_nums": data["page_nums"], "results": results,
-                             "by_source": data["by_source"], "errors": data.get("errors", {}),
-                             "live": True})
 
     # ---- ES 库内检索 ----
     # 活跃维度的筛选（来源/时间）放 post_filter：分面聚合统计不受自身筛选影响，
