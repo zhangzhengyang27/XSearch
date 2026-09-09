@@ -4,7 +4,7 @@ AIHOT AI 资讯爬虫：把 aihot.news 的 AI 精选动态与每日日报写入 
 
 数据来源（站方官方公开 API，llms.txt 声明匿名只读、个人非商业免费，限速 60 req/min）：
     /api/v1/items?mode=selected&window=7d   LLM 摘要+打分的精选动态（-a full=1 拉全量动态）
-    /api/v1/dailies/latest                  每天 08:00（北京时间）发布的精编日报
+    /api/v1/dailies + /api/v1/dailies/{date}  精编日报（默认最近 3 期，-a daily_days=N 可调）
 
 字段映射：
     title=标题  content=LLM摘要(+入选理由)  author=原始信源名  rating=AI评分(0-100)
@@ -39,10 +39,13 @@ class AihotNewsSpider(scrapy.Spider):
         "HANDLE_HTTPSTATUS_LIST": [429, 503],
     }
 
-    def __init__(self, full=0, pages=MAX_PAGES, *args, **kwargs):
+    def __init__(self, full=0, pages=MAX_PAGES, daily_days=3, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mode = "all" if bool(int(full)) else "selected"
         self.max_pages = max(int(pages), 1)
+        # 日报抓取期数：今天 8 点的日报发布前，latest 仍是昨天的，
+        # 抓最近 N 期保证任何时点打开都有数据（幂等覆盖）
+        self.daily_days = max(int(daily_days), 1)
 
     async def start(self):
         headers = {"User-Agent": UA, "Accept": "application/json"}
@@ -54,9 +57,9 @@ class AihotNewsSpider(scrapy.Spider):
             meta={"page": 1},
         )
         yield scrapy.Request(
-            "{}/api/v1/dailies/latest".format(API_BASE),
+            "{}/api/v1/dailies".format(API_BASE),
             headers=headers,
-            callback=self.parse_daily,
+            callback=self.parse_dailies_list,
         )
 
     # ---------------------------------------------------------------- 精选动态
@@ -120,6 +123,28 @@ class AihotNewsSpider(scrapy.Spider):
         }
 
     # ---------------------------------------------------------------- 每日日报
+    def parse_dailies_list(self, response):
+        """日报索引：取最近 N 期，逐期抓取完整报告。"""
+        if response.status in (429, 503):
+            self.logger.warning("AIHOT 限流/不可用 (status=%s)，日报放弃", response.status)
+            self.crawler.stats.inc_value("aihot/ratelimited")
+            return
+        try:
+            data = json.loads(response.text)
+        except json.JSONDecodeError:
+            self.logger.warning("dailies 响应不是合法 JSON")
+            return
+        dates = [(it.get("date") or "").strip()
+                 for it in (data.get("items") or [])][:self.daily_days]
+        dates = [d for d in dates if d]
+        self.logger.info("AIHOT 日报索引，抓取最近 %d 期: %s", len(dates), dates)
+        for date in dates:
+            yield scrapy.Request(
+                "{}/api/v1/dailies/{}".format(API_BASE, date),
+                headers={"User-Agent": UA, "Accept": "application/json"},
+                callback=self.parse_daily,
+            )
+
     def parse_daily(self, response):
         if response.status in (429, 503):
             self.logger.warning("AIHOT 限流 (status=%s)，日报放弃", response.status)
