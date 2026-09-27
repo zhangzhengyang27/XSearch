@@ -115,7 +115,13 @@ onUnmounted(() => clearTimeout(pollTimer))
 
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.toolbar :deep(.el-tabs) { flex: 1; }
+.toolbar :deep(.el-tabs) { flex: 1; min-width: 0; }
+/* 移动端：标签行独占一行，按钮换到下一行，避免被 tabs 挤出视口 */
+@media (max-width: 768px) {
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar :deep(.el-tabs) { flex: 1 1 100%; }
+  .toolbar :deep(.el-tabs__item) { padding: 0 12px; font-size: 14px; }
+}
 .toolbar :deep(.el-tabs__header) { margin-bottom: 0; }
 .block { margin-bottom: 12px; }
 .news-card {

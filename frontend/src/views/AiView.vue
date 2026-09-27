@@ -30,7 +30,9 @@
           <span class="dim">📡 {{ it.author }}</span>
           <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
         </div>
-        <p class="desc" v-if="it.content">{{ it.content }}</p>
+        <p class="desc" v-if="it.content">
+          <el-tag class="ai-tag" size="small" type="info" effect="plain">AI 摘要</el-tag>{{ it.content }}
+        </p>
       </article>
       <div class="pager" v-if="pageNums > 1">
         <el-pagination layout="prev, pager, next" :total="total" :page-size="20"
@@ -49,7 +51,9 @@
             <span v-if="it.view_nums != null">🔗 {{ it.view_nums }} 信源印证</span>
             <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
           </div>
-          <p class="desc" v-if="it.content">{{ it.content }}</p>
+          <p class="desc" v-if="it.content">
+            <el-tag class="ai-tag" size="small" type="info" effect="plain">AI 综述</el-tag>{{ it.content }}
+          </p>
         </div>
       </article>
     </template>
@@ -214,8 +218,14 @@ onUnmounted(() => clearTimeout(pollTimer))
 
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.toolbar :deep(.el-tabs) { flex: 1; }
+.toolbar :deep(.el-tabs) { flex: 1; min-width: 0; }
 .toolbar :deep(.el-tabs__header) { margin-bottom: 0; }
+/* 移动端：标签行独占一行，按钮换到下一行，避免被 tabs 挤出视口 */
+@media (max-width: 768px) {
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar :deep(.el-tabs) { flex: 1 1 100%; }
+  .toolbar :deep(.el-tabs__item) { padding: 0 12px; font-size: 14px; }
+}
 .block { margin-bottom: 12px; }
 
 .news-card, .rank-card {
