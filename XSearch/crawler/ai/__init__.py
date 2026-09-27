@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-AI 大模型工具包（2026 年爬虫的常用手段）。
+反爬对抗工具包。
 
-- llm_client : OpenAI 兼容协议客户端，默认 DeepSeek
-               （deepseek-v4-flash 文本 / deepseek-v4-flash-vision-exp 视觉）
-- vlm_captcha: 用视觉大模型识别滑块/点选验证码（替代 OpenCV 模板匹配）
-- llm_extract: LLM 结构化抽取（选择器失效时的"自愈"兜底，替代只写死 XPath/CSS）
-- fingerprint: 真实浏览器指纹请求头（替代只换 UA 的老做法）
+- fingerprint: 成套的真实浏览器请求头（替代只换 UA 的老做法），
+  仅对 crawler.settings.FINGERPRINT_HOSTS 列出的域名生效。
 
-所有能力通过环境变量配置，不设置 AI_LLM_API_KEY 时自动降级，不影响纯选择器路线的爬取。
+历史上这里还有 LLM 语义抽取兜底与 VLM 滑块/点选验证码识别，因两者都没有
+任何调用路径（现有源用选择器/RSS/公开 API 即可取全），且验证码识别属于
+绕过目标站技术措施，2026-09 一并移除。要再往这个包里加"绕过登录/验证码"
+的能力，先确认它真有调用方、且不违反目标站条款。
 """

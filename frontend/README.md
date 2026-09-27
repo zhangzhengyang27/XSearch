@@ -1,13 +1,23 @@
 # XSearch 前端（Vue 3 + TypeScript + Vite + Element Plus）
 
-调用后端（XSearch Django API）的独立前端工程，四个视图：
+调用后端（XSearch Django API）的独立前端工程，9 个视图组件 / 10 条路由：
 
 | 路由 | 功能 | 调用接口 |
 |---|---|---|
-| `/search` | 关键词搜索：补全建议、结果高亮、分页 | `/api/search/` `/api/suggest/` |
-| `/rankings` | 榜单：抖音热点 / B站热门 / 豆瓣 Top250 | `/api/rankings/` |
+| `/` | 首页：检索入口 + 今日要闻（跨源混排、同题去重） | `/api/headlines/` |
+| `/search` | 关键词搜索：补全建议、结果高亮、来源分面、排序、分页 | `/api/search/` `/api/suggest/` |
+| `/news` | 新闻列表：中新网 / IT之家 / Solidot 分源分页 | `/api/rankings/` |
+| `/ai` | AI 讯息：精选 / 日报 / 热点榜三 Tab | `/api/rankings/` |
+| `/ai/detail` | AI 条目详情（按 `?id=` 精确取文，不再按标题猜） | `/api/doc/<id>/` |
+| `/rankings` | 榜单：抖音热点榜 | `/api/rankings/` |
 | `/stats` | 数据概览：总量、来源分布、热搜词 | `/api/stats/` |
-| `/crawl` | 采集管理：触发爬虫、状态与日志轮询 | `/api/crawl/start/` `/api/crawl/status/` |
+| `/crawl` | 采集管理（需登录）：触发爬虫、状态与日志、定时任务 | `/api/crawl/*` |
+| `/dbadmin` | 数据管理（需登录）：文档浏览/编辑/删除、按来源清理 | `/api/admin/db/*` |
+| `/login` | 管理员登录 | `/api/auth/login/` |
+
+`/crawl`、`/dbadmin` 由 `src/main.ts` 的路由守卫保护，未登录跳 `/login?next=…`；
+清单定义在 `src/auth.ts` 的 `ADMIN_PATHS`（`api.ts` 判断 401 是否跳登录页时复用同一份）。
+面向读者的页面上，「更新数据」等采集按钮仅 `isAdmin` 时渲染。
 
 ## 开发
 

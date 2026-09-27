@@ -3,13 +3,13 @@
     <div class="toolbar">
       <el-tabs v-model="tab" @tab-change="() => load(1)">
         <el-tab-pane label="全部新闻" name="news" />
-        <el-tab-pane label="人民网" name="news_people" />
         <el-tab-pane label="中新网" name="news_chinanews" />
         <el-tab-pane label="IT之家" name="news_ithome" />
         <el-tab-pane label="Solidot" name="news_solidot" />
       </el-tabs>
       <el-button size="small" @click="load(page)" :loading="loading">刷新</el-button>
-      <el-button size="small" type="primary" @click="recrawl" :loading="starting"
+      <!-- 采集会拉起子进程，仅管理员可见（后端 /api/crawl/* 同样要求 X-Admin-Token） -->
+      <el-button v-if="isAdmin" size="small" type="primary" @click="recrawl" :loading="starting"
                  :disabled="crawl.running">
         {{ crawl.running ? '采集中…' : '采集最新新闻' }}
       </el-button>
@@ -17,7 +17,7 @@
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="block" />
     <el-empty v-if="!loading && !items.length"
-              description="暂无新闻，点右上角「采集最新新闻」抓取" />
+              :description="isAdmin ? '暂无新闻，点右上角「采集最新新闻」抓取' : '暂无新闻'" />
 
     <article v-for="it in items" :key="it.url" class="news-card">
       <div class="body">
@@ -42,6 +42,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, errText, type DocItem, type RankingsResult } from '../api'
+import { isAdmin } from '../auth'
 
 const tab = ref('news')
 const items = ref<DocItem[]>([])
@@ -114,7 +115,13 @@ onUnmounted(() => clearTimeout(pollTimer))
 
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.toolbar :deep(.el-tabs) { flex: 1; }
+.toolbar :deep(.el-tabs) { flex: 1; min-width: 0; }
+/* 移动端：标签行独占一行，按钮换到下一行，避免被 tabs 挤出视口 */
+@media (max-width: 768px) {
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar :deep(.el-tabs) { flex: 1 1 100%; }
+  .toolbar :deep(.el-tabs__item) { padding: 0 12px; font-size: 14px; }
+}
 .toolbar :deep(.el-tabs__header) { margin-bottom: 0; }
 .block { margin-bottom: 12px; }
 .news-card {

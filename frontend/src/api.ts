@@ -1,12 +1,14 @@
 // 后端 API 封装：开发态走 Vite 代理（/api -> 127.0.0.1:8000）
 // 生产部署可用 VITE_API_BASE 指向后端绝对地址
-// 后端设置 API_TOKEN 时，前端构建时注入 VITE_API_TOKEN 即可自动携带
-import { adminToken, clearAuth } from './auth'
+// 鉴权只有管理员 token 一层；构建产物里不含任何共享密钥
+import { adminToken, clearAuth, isAdminPath } from './auth'
 
 // ---- 接口响应类型（字段与后端 search/api_views.py、crawl_manager.py 一一对应） ----
 
 /** ES 文档条目：搜索 / 榜单 / 管理接口共用的字段子集，不同来源的字段可能缺省 */
 export interface DocItem {
+  /** ES 文档 _id：详情页据此精确取文（列表类接口都会带上） */
+  id: string
   url: string
   title: string
   content: string
@@ -56,10 +58,11 @@ export interface RankingsResult {
   items: DocItem[]
 }
 
-export interface AiItemResult {
-  q: string
+export interface HeadlinesResult {
+  hours: number
   total: number
   items: DocItem[]
+  top_keywords: string[]
 }
 
 export interface StatsResult {
@@ -184,10 +187,9 @@ interface RequestOptions extends RequestInit {
 }
 
 const BASE = import.meta.env.VITE_API_BASE || ''
-const TOKEN = import.meta.env.VITE_API_TOKEN || ''
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const headers: Record<string, string> = TOKEN ? { 'X-API-Token': TOKEN, ...extra } : { ...extra }
+  const headers: Record<string, string> = { ...extra }
   if (adminToken.value) headers['X-Admin-Token'] = adminToken.value
   return headers
 }
@@ -201,19 +203,42 @@ function errorMessage(data: unknown, status: number): string {
   return `请求失败 (${status})`
 }
 
+/** 带 HTTP 状态码与业务 code 的错误：调用方要区分"资源不存在"和"服务不可用" */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(message: string, status: number, code = '') {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+function errorCode(data: unknown): string {
+  if (data && typeof data === 'object' && 'code' in data) {
+    return String((data as { code: unknown }).code ?? '')
+  }
+  return ''
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = { ...authHeaders(), ...(options.headers || {}) }
   const resp = await fetch(BASE + path, { ...options, headers })
   const data: unknown = await resp.json().catch(() => ({}))
   if (!resp.ok) {
-    // 管理员登录态失效（排除登录接口自身的密码错误 401）：
-    // 清除本地 token 并整页跳登录页，登录后回到当前地址
+    // 管理员登录态失效（排除登录接口自身的密码错误 401）：清除本地 token。
+    // 只在管理页整页跳登录；公开页（/ai /news /rankings）就地报错——把匿名访客甩到
+    // 他看不懂、也回不来的管理登录页是净损失（采集按钮在这些页已按 isAdmin 隐藏）。
     if (resp.status === 401 && !path.startsWith('/api/auth/login')) {
       clearAuth()
-      window.location.href = '/login?next=' +
-        encodeURIComponent(location.pathname + location.search)
+      if (isAdminPath(location.pathname)) {
+        window.location.href = '/login?next=' +
+          encodeURIComponent(location.pathname + location.search)
+      }
     }
-    throw new Error(errorMessage(data, resp.status))
+    throw new ApiError(errorMessage(data, resp.status), resp.status, errorCode(data))
   }
   return data as T
 }
@@ -230,7 +255,7 @@ export const api = {
     return request<string[]>(`/api/suggest/?s=${encodeURIComponent(s)}`)
   },
   stats: () => request<StatsResult>('/api/stats/'),
-  aiItem: (q: string) => request<AiItemResult>(`/api/ai/item/?q=${encodeURIComponent(q)}`),
+  doc: (id: string) => request<DocItem>(`/api/doc/${encodeURIComponent(id)}/`),
   crawlStart: (spider: string, pages: number, js: boolean) => request<CrawlStartResult>('/api/crawl/start/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -240,6 +265,7 @@ export const api = {
   crawlHistory: (limit = 50) => request<{ history: CrawlHistoryItem[] }>(`/api/crawl/history/?limit=${limit}`),
   crawlStats: () => request<CrawlStatsResult>('/api/crawl/stats/'),
   rankings: (source: string, p = 1) => request<RankingsResult>(`/api/rankings/?source=${encodeURIComponent(source)}&p=${p}`),
+  headlines: (hours = 36) => request<HeadlinesResult>(`/api/headlines/?hours=${hours}`),
   crawlSpiders: () => request<{ spiders: SpiderInfo[] }>('/api/crawl/spiders/'),
   // 管理员登录（采集管理页鉴权）
   adminLogin: (username: string, password: string) => request<AdminLoginResult>('/api/auth/login/', {

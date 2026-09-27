@@ -7,12 +7,15 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.generic import View
 
+from search.seo_views import robots_txt, sitemap_xml
+
 from search.api_views import (api_admin_login, api_admin_logout,
-                              api_ai_item, api_crawl_start, api_crawl_status,
+                              api_crawl_start, api_crawl_status,
                               api_crawl_spiders, api_crawl_history, api_crawl_stats,
                               api_crawl_resumable,
                               api_db_doc, api_db_docs, api_db_overview, api_db_purge,
-                              api_img, api_rankings,
+                              api_doc,
+                              api_health, api_img, api_rankings, api_headlines,
                               api_schedule_add, api_schedule_list, api_schedule_remove,
                               api_schedule_toggle, api_schedule_update,
                               api_search, api_stats, api_suggest)
@@ -37,7 +40,12 @@ urlpatterns = [
     path('api/search/', api_search, name="api-search"),
     path('api/suggest/', api_suggest, name="api-suggest"),
     path('api/stats/', api_stats, name="api-stats"),
+    path('api/health/', api_health, name="api-health"),
+    # 搜索引擎入口（顶层路径，nginx 需单独转发这两条）
+    path('robots.txt', robots_txt, name="robots"),
+    path('sitemap.xml', sitemap_xml, name="sitemap"),
     path('api/rankings/', api_rankings, name="api-rankings"),
+    path('api/headlines/', api_headlines, name="api-headlines"),
     path('api/auth/login/', api_admin_login, name="api-auth-login"),
     path('api/auth/logout/', api_admin_logout, name="api-auth-logout"),
     path('api/crawl/start/', api_crawl_start, name="api-crawl-start"),
@@ -56,5 +64,5 @@ urlpatterns = [
     path('api/admin/db/doc/<str:doc_id>/', api_db_doc, name="api-db-doc"),
     path('api/admin/db/purge/', api_db_purge, name="api-db-purge"),
     path('api/img/', api_img, name="api-img"),
-    path('api/ai/item/', api_ai_item, name="api-ai-item"),
+    path('api/doc/<str:doc_id>/', api_doc, name="api-doc"),
 ]

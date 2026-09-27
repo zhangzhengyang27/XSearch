@@ -2,12 +2,13 @@
   <div class="app">
     <header class="header">
       <div class="brand" @click="$router.push('/')">
-        <span class="logo">X</span>Search
+        <span class="logo">X</span><span class="word">Search</span>
       </div>
       <el-menu mode="horizontal" :default-active="$route.path" router :ellipsis="false" class="nav">
-        <el-menu-item index="/ai">AI 讯息</el-menu-item>
+        <el-menu-item index="/">首页</el-menu-item>
         <el-menu-item index="/search">搜索</el-menu-item>
         <el-menu-item index="/news">新闻</el-menu-item>
+        <el-menu-item index="/ai">AI 讯息</el-menu-item>
         <el-menu-item index="/rankings">抖音榜单</el-menu-item>
         <el-menu-item index="/stats">数据概览</el-menu-item>
         <el-menu-item v-if="isAdmin" index="/crawl">采集管理</el-menu-item>
@@ -82,7 +83,10 @@ async function logout(): Promise<void> {
   white-space: nowrap;
 }
 .logo { color: var(--el-color-primary); }
-.nav { flex: 1; border-bottom: none !important; }
+/* min-width:0 是必需的：flex 子项默认 min-width:auto，导航撑不住就会把整页
+   顶出视口（实测 375px 下 documentElement 宽 636px，登录按钮被推到看不见的地方） */
+.nav { flex: 1; min-width: 0; overflow-x: auto; border-bottom: none !important; }
+.nav::-webkit-scrollbar { height: 0; }
 .login-btn { flex-shrink: 0; }
 .main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
 .footer {
@@ -90,5 +94,18 @@ async function logout(): Promise<void> {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   padding: 20px 0 28px;
+}
+
+/* 移动端：页头收紧到一屏内，导航改为在自身容器里横向滑动 */
+@media (max-width: 768px) {
+  .header { gap: 10px; padding: 0 12px; }
+  .brand { font-size: 18px; }
+  .nav :deep(.el-menu-item) { padding: 0 12px; font-size: 14px; }
+  .main { padding: 16px 12px 40px; }
+}
+
+/* 窄到 480px 以下时"Search"这个词先让位，保证导航和登录按钮都在视口内 */
+@media (max-width: 480px) {
+  .brand .word { display: none; }
 }
 </style>

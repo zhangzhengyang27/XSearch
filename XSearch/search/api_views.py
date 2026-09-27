@@ -2,28 +2,40 @@
 """后端 JSON API（前后端分离改造后的唯一对外层）。
 
 路由（见 XSearch/urls.py）：
-    GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
-    GET  /api/suggest?s=        搜索框补全
-    GET  /api/stats             数据概览（总量/来源分布/热搜词）
-    POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
-    GET  /api/crawl/status      采集状态 + 日志尾部
-    POST /api/auth/login        管理员登录（签发 token）
-    POST /api/auth/logout       退出登录（吊销 token）
-    「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
-    与「数据管理」接口（ES 文档浏览/编辑/删除/清理）均要求
-    X-Admin-Token（require_admin），见各视图装饰器。
+    公开（无需登录）：
+        GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
+        GET  /api/suggest?s=        搜索框补全
+        GET  /api/stats             数据概览（总量/来源分布/热搜词）
+        GET  /api/health            存活探针（真检 ES/Redis，故障返回 503）
+        GET  /api/rankings          榜单 / 新闻列表
+        GET  /api/ai/item           AI 条目详情
+        GET  /api/img               图片代理
+    管理员（X-Admin-Token，require_admin）：
+        POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
+        GET  /api/crawl/status      采集状态 + 日志尾部
+        POST /api/auth/logout       退出登录（吊销 token）
+        「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
+        与「数据管理」接口（ES 文档浏览/编辑/删除/清理）
+    免鉴权：POST /api/auth/login（按 IP 限速，见 _login_locked_for / _login_record_failure）
 
-所有接口在 ES/Redis/LLM 不可用时返回结构化错误（非 500），前端据此降级展示。
+鉴权只有一层：管理员 token。历史上另有可选的 API_TOKEN（X-API-Token），
+但它要生效必须打进前端产物，公开仓库里的 dist 等于钥匙，且所有受保护接口
+本来就已要求管理员登录 —— 2026-09 整体移除，不再保留半死的第二层。
+
+所有接口在 ES/Redis 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
+import datetime
 import functools
 import hmac
 import json
 import logging
 import math
 import os
+import re
 import secrets
 import threading
 import time
+from zoneinfo import ZoneInfo
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -54,19 +66,26 @@ def _es_error(e):
     return JsonResponse({"error": "Elasticsearch 不可用: {}".format(e)}, status=503)
 
 
-def require_api_token(view):
-    """可选鉴权：settings.API_TOKEN 非空时要求请求头 X-API-Token 匹配。
+# ES 里日期一律按 UTC 存取；读者看到的"发布日期"要换回站点时区的日历日，
+# 否则北京时间早上 8 点前发布的内容会被归到前一天
+_DISPLAY_TZ = ZoneInfo(settings.TIME_ZONE)
 
-    本机开发态默认不启用（Token 留空即开放）；公网部署时设置 API_TOKEN
-    即可保护写操作与 AI 问答（LLM 调用有成本）。
+
+def _display_date(value):
+    """把 ES 的日期（ISO 串 / datetime）换算成站点时区的 YYYY-MM-DD。
+
+    解析不了退回原串前 10 位——读接口不能因为一条脏数据整页 500。
     """
-    @functools.wraps(view)
-    def wrapped(request, *args, **kwargs):
-        token = getattr(settings, "API_TOKEN", "")
-        if token and request.headers.get("X-API-Token", "") != token:
-            return JsonResponse({"error": "无效的 API Token"}, status=401)
-        return view(request, *args, **kwargs)
-    return wrapped
+    if not value:
+        return ""
+    text = value.isoformat() if isinstance(value, datetime.datetime) else str(value)
+    try:
+        dt = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)  # ES 回读的 naive 串即 UTC
+    return dt.astimezone(_DISPLAY_TZ).strftime("%Y-%m-%d")
 
 
 # ---- 管理员登录（「采集管理」页鉴权）----
@@ -101,6 +120,61 @@ def require_admin(view):
     return wrapped
 
 
+# ---- 登录限速（按客户端 IP）----
+# 与 _admin_tokens 同构，状态在进程内：当前部署为 gunicorn --workers 1（见
+# Dockerfile 注释），成立；扩容多 worker 前必须把计数外置到 Redis。
+# X-Forwarded-For 可被客户端伪造，这里仍优先取用是因为真实链路是
+# frp -> VPS nginx 反代（只看 REMOTE_ADDR 限不到攻击者）；代理不受信任时
+# 设环境变量 DJANGO_TRUST_PROXY_HEADER=False 退回 REMOTE_ADDR。
+_LOGIN_MAX_FAILS = 5      # 窗口内允许的失败次数
+_LOGIN_WINDOW = 300       # 失败计数窗口（秒）
+_LOGIN_LOCKOUT = 900      # 超限后锁定时长（秒）
+_login_failures = {}      # ip -> (fail_count, window_start, locked_until)
+
+
+def _client_ip(request):
+    if getattr(settings, "TRUST_PROXY_HEADER", True):
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if xff:
+            return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _login_locked_for(ip):
+    """返回该 IP 还需等待的秒数，0 表示未被锁定；顺带丢弃过期窗口。"""
+    now = time.time()
+    with _admin_lock:
+        rec = _login_failures.get(ip)
+        if not rec:
+            return 0
+        _count, window_start, locked_until = rec
+        if locked_until > now:
+            return int(locked_until - now) + 1
+        if now - window_start > _LOGIN_WINDOW:
+            _login_failures.pop(ip, None)
+        return 0
+
+
+def _login_record_failure(ip):
+    """记一次失败；达到阈值则上锁。"""
+    now = time.time()
+    with _admin_lock:
+        count, window_start, _until = _login_failures.get(ip, (0, now, 0))
+        if now - window_start > _LOGIN_WINDOW:
+            count, window_start = 0, now
+        count += 1
+        locked_until = now + _LOGIN_LOCKOUT if count >= _LOGIN_MAX_FAILS else 0
+        _login_failures[ip] = (count, window_start, locked_until)
+        if locked_until:
+            logger.warning("登录限速：%s 连续失败 %d 次，锁定 %d 秒",
+                           ip or "unknown", count, _LOGIN_LOCKOUT)
+
+
+def _login_clear(ip):
+    with _admin_lock:
+        _login_failures.pop(ip, None)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_admin_login(request):
@@ -111,18 +185,28 @@ def api_admin_login(request):
         return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
     username = (payload.get("username") or "").strip()
     password = (payload.get("password") or "").strip()
+    ip = _client_ip(request)
+    # 先看锁定，再做密码比较：锁定期间不再消耗比较成本，也不给爆破者反馈
+    remaining = _login_locked_for(ip)
+    if remaining:
+        resp = JsonResponse({"error": "失败次数过多，请 {} 秒后重试".format(remaining),
+                             "code": "too_many_login_attempts"}, status=429)
+        resp["Retry-After"] = str(remaining)
+        return resp
     admin_user = getattr(settings, "ADMIN_USERNAME", "")
     admin_pass = getattr(settings, "ADMIN_PASSWORD", "")
     if not admin_user or not admin_pass:
         return JsonResponse(
             {"error": "管理员账号未配置：请创建 XSearch/local_settings.py"
                       "（参考 local_settings.py.example）"},
-            status=500)
+            status=503)
     # 常数时间比较，避免时序侧信道逐步猜解账号密码
     user_ok = hmac.compare_digest(username.encode("utf-8"), admin_user.encode("utf-8"))
     pass_ok = hmac.compare_digest(password.encode("utf-8"), admin_pass.encode("utf-8"))
     if not (user_ok and pass_ok):
+        _login_record_failure(ip)
         return JsonResponse({"error": "用户名或密码错误"}, status=401)
+    _login_clear(ip)
     token = secrets.token_hex(32)
     with _admin_lock:
         _admin_tokens[token] = time.time() + _ADMIN_TOKEN_TTL
@@ -238,6 +322,8 @@ def api_search(request):
             src = hit["_source"]
             hl = hit.get("highlight") or {}
             results.append({
+                # ES 文档 _id：详情页按稳定 id 取文，不再用"标题再搜一遍取第一条"
+                "id": hit.get("_id", ""),
                 "title": "".join(hl["title"]) if hl.get("title") else src.get("title", ""),
                 "content": "".join(hl["content"]) if hl.get("content") else (src.get("content") or "")[:200],
                 "url": src.get("url", ""),
@@ -246,7 +332,7 @@ def api_search(request):
                 "rating": src.get("rating"),
                 "rank": src.get("rank"),
                 "front_image_url": src.get("front_image_url", ""),
-                "create_date": (src.get("create_date") or "")[:10],
+                "create_date": _display_date(src.get("create_date")),
                 "praise_nums": src.get("praise_nums"),
                 "view_nums": src.get("view_nums"),
                 "reply_nums": src.get("reply_nums"),
@@ -380,51 +466,131 @@ def api_stats(request):
     return JsonResponse(data)
 
 
-# 新闻来源：news_rss 爬虫入库的 4 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
-NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
+@require_http_methods(["GET"])
+def api_headlines(request):
+    """首页「今日要闻」：跨来源按发布时间倒序混排，同题只留一条。
+
+    不复用 /api/rankings?source=news：那个接口是单来源列表，首页要的是
+    "新闻 + AI 内容放一起看今天发生了什么"；同时必须排除榜单类，
+    榜单条目没有发布时间语义，混进来会长期占住"最新"的位置。
+    """
+    try:
+        hours = min(max(int(request.GET.get("hours", 36)), 1), 168)
+    except (TypeError, ValueError):
+        hours = 36
+    cache_key = "headlines:{}".format(hours)
+    try:
+        raw = redis_cli.get(cache_key)
+        if raw:
+            return JsonResponse(json.loads(raw))
+    except Exception:
+        pass  # Redis 不可用只是少了缓存，不影响出结果
+
+    try:
+        resp = client.search(
+            index=INDEX,
+            query={"bool": {
+                "must_not": [{"terms": {"source": list(RANKING_SOURCES)}}],
+                "filter": [{"range": {"create_date": {"gte": "now-{}H".format(hours)}}}],
+            }},
+            sort=[{"create_date": {"order": "desc", "missing": "_last"}}],
+            size=60,   # 多取一些再按标题去重，避免同一事件的多源报道刷屏
+        )
+    except Exception as e:
+        return _es_error(e)
+
+    items, seen = [], set()
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        key = re.sub(r"\s+", "", src.get("title") or "")[:40]
+        if key and key in seen:
+            continue
+        seen.add(key)
+        items.append(_list_item(hit, keep_content=src.get("source") in AI_SOURCES))
+        if len(items) >= 20:
+            break
+
+    try:
+        hot = redis_cli.zrevrangebyscore(
+            "search_keywords_set", "+inf", "-inf", start=0, num=6)
+    except Exception:
+        hot = []
+    payload = {"hours": hours, "total": len(items), "items": items, "top_keywords": hot}
+    try:
+        redis_cli.setex(cache_key, 120, json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+    return JsonResponse(payload)
+
+
+def api_health(request):
+    """存活探针：真去问 ES 与 Redis，任一不可用就返回 503。
+
+    为什么单独有它：/api/stats 把依赖故障降级成 200 + es_ok:false 字段，
+    而镜像的 HEALTHCHECK 打的正是 /api/stats —— 结果 ES 死了容器仍报 healthy，
+    "悄悄停更"没人知道。错误内容只回异常类名，不回消息串（避免把 ES 地址等
+    内部信息泄给公网）。
+    """
+    checks, code = {}, 200
+    try:
+        client.info()
+        checks["elasticsearch"] = "ok"
+    except Exception as e:
+        checks["elasticsearch"] = type(e).__name__
+        code = 503
+    try:
+        redis_cli.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = type(e).__name__
+        code = 503
+    # 索引状态只报告不参与判定：首次部署索引还没建，不该因此把容器判死。
+    # 取不到/形状不对一律归为 None——探针自己抛 500 比什么都糟。
+    try:
+        docs = int(client.count(index=INDEX)["count"])
+    except Exception:
+        docs = None
+    return JsonResponse({"status": "ok" if code == 200 else "degraded",
+                         "checks": checks,
+                         "index": {"name": INDEX, "docs": docs}}, status=code)
+
+
+# 新闻来源：news_rss 爬虫入库的 3 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）# 人民网（news_people）已停用：其 RSS 自 2025-06 起不再更新，见 spiders/news_rss.py 说明。
+# 已入库的 news_people 文档仍可通过 /api/search 检索到，故保留在前端来源标签映射里。
+NEWS_SOURCES = ("news_chinanews", "news_ithome", "news_solidot")
 # AI 来源：AIHOT 精选动态 / 日报 / 热点榜（独立 AI 导航页使用）
 AI_SOURCES = ("aihot_news", "aihot_daily", "aihot_hot")
 
 
 @require_http_methods(["GET"])
-def api_ai_item(request):
-    """AI 条目详情：按标题在本地 ES 中检索完整文档（AI 精选/日报/热点榜）。
+@require_http_methods(["GET"])
+def api_doc(request, doc_id):
+    """按 ES 文档 _id 取单篇详情（列表类接口都会带上 id）。
 
-    供 /ai/detail 详情页使用——标题相关度排序，返回完整正文（不截断）。
+    取代旧的 /api/ai/item：那条路径拿标题去 multi_match 再取第一条，
+    标题相近或撞车时会把读者带到另一篇文章上——资讯站的一次错链就是一次
+    信任崩塌，而且代码里根本无法察觉。
     """
-    q = request.GET.get("q", "").strip()
-    if not q:
-        return JsonResponse({"error": "缺少参数 q"}, status=400)
     try:
-        resp = client.search(
-            index=INDEX,
-            query={"bool": {
-                "must": {"multi_match": {"query": q, "fields": ["title^3", "content"]}},
-                "filter": [{"terms": {"source": list(AI_SOURCES)}}],
-            }},
-            size=5,
-        )
+        hit = client.get(index=INDEX, id=doc_id)
+    except NotFoundError:
+        return JsonResponse({"error": "文章不存在或已被清理", "code": "not_found"}, status=404)
     except Exception as e:
         return _es_error(e)
-    items = [{
-        "title": h["_source"].get("title", ""),
-        "content": h["_source"].get("content", ""),
-        "author": h["_source"].get("author", ""),
-        "source": h["_source"].get("source", ""),
-        "rating": h["_source"].get("rating"),
-        "url": h["_source"].get("url", ""),
-        "create_date": (h["_source"].get("create_date") or "")[:10],
-    } for h in resp["hits"]["hits"]]
-    return JsonResponse({"q": q, "total": len(items), "items": items})
+    # 详情页始终给全文（列表页才做 150 字截断），并保留原文链接由前端引导回源站
+    data = _list_item(hit, keep_content=True)
+    data["id"] = hit.get("_id") or doc_id
+    return JsonResponse(data)
 
-
-def _list_item(src, keep_content=False):
+def _list_item(hit, keep_content=False):
     """榜单/新闻列表条目的统一字段映射。
 
     keep_content=True 时保留全文（AI 日报/热点榜页需要展示综述与日报正文），
     否则截断为 150 字摘要。
     """
+    src = hit["_source"]
     return {
+        "id": hit.get("_id", ""),
         "rank": src.get("rank"),
         "title": src.get("title", ""),
         "content": (src.get("content") or "")[:5000 if keep_content else 150],
@@ -437,7 +603,7 @@ def _list_item(src, keep_content=False):
         "praise_nums": src.get("praise_nums"),
         "danmaku_nums": src.get("danmaku_nums"),
         "reply_nums": src.get("reply_nums"),
-        "create_date": (src.get("create_date") or "")[:10],
+        "create_date": _display_date(src.get("create_date")),
     }
 
 
@@ -457,7 +623,7 @@ def api_rankings(request):
             and source not in NEWS_SOURCES and source not in AI_SOURCES):
         return JsonResponse({"error": "不支持的榜单来源"}, status=400)
 
-    # 分页时间倒序分支：新闻 4 源聚合 + 各源 + AI 日报（aihot_hot 属榜单类，走下方 rank 分支）
+    # 分页时间倒序分支：新闻 3 源聚合 + 各源 + AI 日报（aihot_hot 属榜单类，走下方 rank 分支）
     if source == "news" or source in NEWS_SOURCES or source == "aihot_daily":
         page_size = 20
         # 新闻列表 60 秒缓存：页面轮询/翻页密集，且语料分钟级变化足够
@@ -488,7 +654,7 @@ def api_rankings(request):
         payload = {
             "source": source, "total": total, "page": page,
             "page_nums": math.ceil(total / page_size) if total else 0,
-            "items": [_list_item(h["_source"], keep_content=keep) for h in resp["hits"]["hits"]],
+            "items": [_list_item(h, keep_content=keep) for h in resp["hits"]["hits"]],
         }
         try:
             redis_cli.setex(cache_key, 60, json.dumps(payload, ensure_ascii=False))
@@ -507,12 +673,12 @@ def api_rankings(request):
         return _es_error(e)
 
     # AI 热点榜需要完整 AI 综述
-    items = [_list_item(h["_source"], keep_content=source in AI_SOURCES)
+    items = [_list_item(h, keep_content=source in AI_SOURCES)
              for h in resp["hits"]["hits"]]
     return JsonResponse({"source": source, "total": len(items), "items": items})
 
 
-@require_api_token
+@require_admin
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_crawl_start(request):
@@ -540,7 +706,9 @@ def api_crawl_resumable(request):
     return JsonResponse({"jobs": crawl_manager.list_resumable_jobs()})
 
 
+@require_admin
 def api_crawl_status(request):
+    """采集状态 + 日志尾部（含服务器绝对路径，仅限管理员）。"""
     return JsonResponse(crawl_manager.status())
 
 
@@ -573,7 +741,6 @@ def api_schedule_list(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_add(request):
@@ -600,7 +767,6 @@ def api_schedule_add(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_remove(request):
@@ -616,7 +782,6 @@ def api_schedule_remove(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_update(request):
@@ -642,7 +807,6 @@ def api_schedule_update(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_toggle(request):

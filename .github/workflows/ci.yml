@@ -1,0 +1,72 @@
+# 最小 CI：把"发布清单"里靠人自觉的两条变成机器把关
+#   - python manage.py test search 全绿
+#   - 前端 vue-tsc 类型检查 + vite build
+# 测试不依赖 ES/Redis/SMTP（全部 mock），所以这里不需要起服务容器。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 后端 lint + 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: XSearch/requirements-lock.txt
+
+      # 与镜像构建用同一份锁定依赖：CI 通过 ≈ 镜像里也是这套版本
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r XSearch/requirements-lock.txt
+          pip install "ruff>=0.6"
+
+      - name: Ruff（E9 语法 + F pyflakes）
+        run: ruff check .
+
+      - name: Django 测试
+        working-directory: XSearch
+        env:
+          DJANGO_DEBUG: 'True'      # 测试态用开发密钥；生产 fail-closed 见 settings.py
+        run: python manage.py test search --verbosity=2
+
+  frontend:
+    name: 前端类型检查 + 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # package-lock.json 的 resolved 指向 npmmirror；若 CI 拉取失败，
+      # 改成 npm install --registry=https://registry.npmjs.org 并重新锁版本
+      - name: 安装依赖（锁定版本，可复现）
+        working-directory: frontend
+        run: npm ci
+
+      - name: 构建（vue-tsc --noEmit && vite build）
+        working-directory: frontend
+        run: npm run build
+
+      - name: 产物体积守门（单 chunk JS 超 1.2MB 视为回归）
+        working-directory: frontend
+        run: |
+          largest=$(find dist/assets -name '*.js' -printf '%s\n' | sort -n | tail -1)
+          echo "最大 JS chunk: $largest bytes"
+          test "$largest" -lt 1258291 || { echo "包体膨胀超过 1.2MB，检查是否又丢了路由懒加载"; exit 1; }

@@ -7,7 +7,8 @@
         <el-tab-pane label="AI 热点榜" name="hot" />
       </el-tabs>
       <el-button size="small" @click="load(page)" :loading="loading">刷新</el-button>
-      <el-button size="small" type="primary" @click="recrawl" :loading="starting"
+      <!-- 采集会拉起子进程，仅管理员可见（后端 /api/crawl/* 同样要求 X-Admin-Token） -->
+      <el-button v-if="isAdmin" size="small" type="primary" @click="recrawl" :loading="starting"
                  :disabled="crawl.running">
         {{ crawl.running ? '采集中…' : '更新数据' }}
       </el-button>
@@ -16,12 +17,12 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="block" />
     <el-alert v-if="hint" :title="hint" type="info" show-icon :closable="false" class="block" />
     <el-empty v-if="!loading && !items.length"
-              description="暂无数据，点右上角「更新数据」采集" />
+              :description="isAdmin ? '暂无数据，点右上角「更新数据」采集' : '暂无数据'" />
 
     <!-- AI 精选：feed 流（LLM 摘要 + 评分） -->
     <template v-if="tab === 'selected'">
       <article v-for="it in items" :key="it.url" class="news-card">
-        <router-link :to="{ path: '/ai/detail', query: { q: it.title } }"
+        <router-link :to="{ path: '/ai/detail', query: { id: it.id } }"
                      class="title">{{ it.title }}</router-link>
         <div class="meta">
           <el-tag v-if="it.rating != null" size="small" effect="dark" type="warning"
@@ -29,7 +30,9 @@
           <span class="dim">📡 {{ it.author }}</span>
           <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
         </div>
-        <p class="desc" v-if="it.content">{{ it.content }}</p>
+        <p class="desc" v-if="it.content">
+          <el-tag class="ai-tag" size="small" type="info" effect="plain">AI 摘要</el-tag>{{ it.content }}
+        </p>
       </article>
       <div class="pager" v-if="pageNums > 1">
         <el-pagination layout="prev, pager, next" :total="total" :page-size="20"
@@ -42,13 +45,15 @@
       <article v-for="it in items" :key="it.url" class="rank-card">
         <div class="rank-no" :class="{ top: (it.rank ?? 99) <= 3 }">{{ it.rank }}</div>
         <div class="body">
-          <router-link :to="{ path: '/ai/detail', query: { q: it.title } }"
+          <router-link :to="{ path: '/ai/detail', query: { id: it.id } }"
                        class="title">{{ it.title }}</router-link>
           <div class="meta">
             <span v-if="it.view_nums != null">🔗 {{ it.view_nums }} 信源印证</span>
             <span v-if="it.create_date" class="dim">📅 {{ it.create_date }}</span>
           </div>
-          <p class="desc" v-if="it.content">{{ it.content }}</p>
+          <p class="desc" v-if="it.content">
+            <el-tag class="ai-tag" size="small" type="info" effect="plain">AI 综述</el-tag>{{ it.content }}
+          </p>
         </div>
       </article>
     </template>
@@ -70,7 +75,9 @@
             <section v-for="(sec, si) in d.parsed.sections" :key="'s' + si" class="daily-section">
               <div class="section-label">{{ sec.label }}</div>
               <div v-for="(item, ii) in sec.items" :key="ii" class="daily-item">
-                <router-link :to="{ path: '/ai/detail', query: { q: item.title } }"
+                <!-- 日报版块条目是从日报正文解析出来的，不是独立文档，
+                     所以跳搜索而不是跳详情（跳详情只能靠标题猜，会带错文） -->
+                <router-link :to="{ path: '/search', query: { q: item.title } }"
                              class="item-title">{{ item.title }}</router-link>
                 <p v-if="item.summary" class="item-summary">{{ item.summary }}</p>
               </div>
@@ -95,6 +102,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, errText, type DocItem } from '../api'
+import { isAdmin } from '../auth'
 
 const tab = ref('selected')
 const items = ref<DocItem[]>([])
@@ -212,8 +220,14 @@ onUnmounted(() => clearTimeout(pollTimer))
 
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.toolbar :deep(.el-tabs) { flex: 1; }
+.toolbar :deep(.el-tabs) { flex: 1; min-width: 0; }
 .toolbar :deep(.el-tabs__header) { margin-bottom: 0; }
+/* 移动端：标签行独占一行，按钮换到下一行，避免被 tabs 挤出视口 */
+@media (max-width: 768px) {
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar :deep(.el-tabs) { flex: 1 1 100%; }
+  .toolbar :deep(.el-tabs__item) { padding: 0 12px; font-size: 14px; }
+}
 .block { margin-bottom: 12px; }
 
 .news-card, .rank-card {

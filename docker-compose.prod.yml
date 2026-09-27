@@ -29,12 +29,16 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # 允许 _snapshot API 用文件系统仓库（deploy/backup.sh 依赖它做热备份）；
+      # 直接热拷 ./data/es 在 ES 运行时会备出坏数据，所以必须走快照
+      - path.repo=/snapshots
     ulimits:
       memlock:
         soft: -1
         hard: -1
     volumes:
       - ./data/es:/usr/share/elasticsearch/data
+      - ./data/snapshots:/snapshots
     # 健康检查 + backend 依赖门控：避免 backend/爬虫在 ES 就绪前启动
     # （否则爬虫的 ES pipeline 连接超时，整轮数据不入库，2026-09-10 首发实测踩过）
     healthcheck:
@@ -65,6 +69,12 @@ services:
     container_name: xsearch-backend
     env_file: .env
     environment:
+      # 生产形态写死在 compose 里，不依赖 .env 是否记得设：
+      # DEBUG=False 时 settings.py 要求 .env 必须提供
+      #   DJANGO_SECRET_KEY   （随机长串）
+      #   DJANGO_ALLOWED_HOSTS（公网域名，逗号分隔）
+      # 缺失即拒绝启动（有意 fail-closed，避免用已知密钥/调试页面上线）。
+      - DJANGO_DEBUG=False
       # Django 与 Scrapy 统一读 ES_URL（crawler/settings.py 会回退读它）
       - ES_URL=http://elasticsearch:9200
       - REDIS_URL=redis://redis:6379/0

@@ -89,6 +89,16 @@ class QuoteDocument(Document):
         name = "quotes"
 
 
+def utc_now():
+    """采集时刻，一律带时区（UTC）。
+
+    naive 的 datetime.now() 会被 ES 当作 UTC 解释；容器里 TZ=Asia/Shanghai，
+    于是每条文档的时间都往前推了 8 小时——"近 7 天"分面与按时间排序都会错位。
+    写入统一 aware UTC，展示侧再按站点时区换算（见 search/api_views._display_date）。
+    """
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 def _to_int(value):
     try:
         return int(value) if value not in (None, "") else None
@@ -171,7 +181,7 @@ def index_item(item, source=None):
         rank=_to_int(item.get("rank")),
         source=item.get("source") or source,
         create_date=item.get("create_date"),
-        crawled_at=datetime.datetime.now(),
+        crawled_at=utc_now(),
     )
     doc.meta.id = item.get("url_object_id") or _md5(url + content[:200])
     try:

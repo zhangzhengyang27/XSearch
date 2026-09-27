@@ -19,16 +19,32 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.11/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# 支持环境变量覆盖，生产环境务必设置 DJANGO_SECRET_KEY
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", '5)$op9fxf2b#%(*_-qcr7sf)*c@gr!v=d851(*3f*2gef0f!#d')
-
 # SECURITY WARNING: don't run with debug turned on in production!
-# 支持环境变量覆盖：DJANGO_DEBUG=false 关闭调试模式
+# 支持环境变量覆盖：DJANGO_DEBUG=true 打开调试（仅本机开发态）
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# 不再内置可用的默认密钥：该文件随公开仓库分发，任何"忘记配 DJANGO_SECRET_KEY"
+# 的部署都等于在用一把已泄露的密钥签发会话/CSRF token。
+# 现在 DEBUG=False（生产形态，由 docker-compose.prod.yml 注入）时直接拒绝启动。
+_DEV_ONLY_KEY = "django-insecure-dev-only-xsearch-set-django-secret-key-to-run-in-production"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY") or (_DEV_ONLY_KEY if DEBUG else "")
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG=False 时必须设置 DJANGO_SECRET_KEY 与 DJANGO_ALLOWED_HOSTS。\n"
+        "  生成密钥：python -c \"import secrets;print(secrets.token_urlsafe(50))\"\n"
+        "  写入 NAS 上的 .env（与 docker-compose.prod.yml 同级）后再起容器。")
+elif SECRET_KEY == _DEV_ONLY_KEY:
+    import sys
+    print("⚠️  正在使用仅限开发态的 SECRET_KEY（DEBUG=True）。"
+          "任何对外可访问的部署前必须设置 DJANGO_SECRET_KEY。", file=sys.stderr)
 
 # 允许的主机名，支持环境变量覆盖（逗号分隔），生产环境务必设置
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()]
+if DEBUG and not ALLOWED_HOSTS:
+    # DEBUG 模式下 Django 本就会放行 localhost/127.0.0.1，显式补上便于容器内健康检查
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 # ---------- 生产环境安全配置（DEBUG=False 时自动启用） ----------
 if not DEBUG:
@@ -50,16 +66,18 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
 
-    # 生产环境强制要求 ALLOWED_HOSTS 非空
+    # 生产环境强制要求 ALLOWED_HOSTS 非空（否则 Django 会拒掉所有请求）
     if not ALLOWED_HOSTS:
         import sys
-        print("⚠️  生产环境（DEBUG=False）必须设置 DJANGO_ALLOWED_HOSTS 环境变量！")
-        print("   示例：export DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com")
+        print("⚠️  生产环境（DJANGO_DEBUG=False）必须设置 DJANGO_ALLOWED_HOSTS！")
+        print("   写入 compose 同级的 .env，例：DJANGO_ALLOWED_HOSTS=xsearch.example.com")
+        print("   （留空会导致站点对所有 Host 返回 400，这里是有意早退而不是静默降级）")
         sys.exit(1)
 
-    # 生产环境警告：SECRET_KEY 使用默认值
-    if SECRET_KEY == '5)$op9fxf2b#%(*_-qcr7sf)*c@gr!v=d851(*3f*2gef0f!#d':
-        print("⚠️  警告：生产环境使用了默认 SECRET_KEY，请设置 DJANGO_SECRET_KEY 环境变量！")
+
+# 是否采信 X-Forwarded-For 取客户端 IP（登录限速用）。
+# 真实链路 frp -> VPS nginx 会写该头；若前端代理不受信，设为 False 退回 REMOTE_ADDR
+TRUST_PROXY_HEADER = os.getenv("DJANGO_TRUST_PROXY_HEADER", "True").lower() in ("true", "1", "yes")
 
 
 # Application definition
@@ -175,16 +193,20 @@ ES_INDEX = os.getenv("ES_INDEX", "quotes")
 # ---------- Redis 配置（支持环境变量覆盖） ----------
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 
-# ---------- API 鉴权（可选） ----------
-# 设置后写操作接口（爬虫启动/定时任务/评论抓取）与 AI 问答接口要求请求头
-# X-API-Token 匹配；留空表示不启用（本机开发态默认开放）
-API_TOKEN = os.getenv("API_TOKEN", "")
-
 # ---------- 管理员账号（「采集管理」页登录） ----------
 # 优先读环境变量，再由 XSearch/local_settings.py（已 gitignore，严禁提交）覆盖；
 # 两者都未配置时登录接口直接拒绝，采集管理不可用
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+# ---------- 采集失败/停更告警（邮件，见 search/notify.py） ----------
+# QQ/163 等邮箱要用"SMTP 授权码"而非登录密码；未启用时 notify() 是 no-op。
+ALERT_EMAIL_ENABLED = os.getenv("ALERT_EMAIL_ENABLED", "False").lower() in ("true", "1", "yes")
+ALERT_SMTP_HOST = os.getenv("ALERT_SMTP_HOST", "smtp.qq.com")
+ALERT_SMTP_PORT = int(os.getenv("ALERT_SMTP_PORT", "465") or 465)
+ALERT_SMTP_USER = os.getenv("ALERT_SMTP_USER", "")
+ALERT_SMTP_PASSWORD = os.getenv("ALERT_SMTP_PASSWORD", "")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")  # 逗号分隔；留空则发给 USER
 
 _local_settings = os.path.join(BASE_DIR, "local_settings.py")
 if os.path.exists(_local_settings):
