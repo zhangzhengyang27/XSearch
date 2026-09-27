@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-XSearch 基础单元测试。
+XSearch 单元测试。
 
-覆盖：API 接口参数校验、CORS 中间件、
-      搜索查询构建逻辑等不依赖外部服务（ES/Redis/LLM）的部分。
+覆盖：API 参数校验、CORS 中间件、管理员鉴权与登录限速、采集接口权限、
+      采集状态机与定时任务持久化（不依赖 ES/Redis/外部 SMTP）。
 
 运行：python manage.py test search
 """
 import json
+import os
+import tempfile
+import threading
+import time
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, RequestFactory, override_settings
@@ -675,3 +679,263 @@ class CrawlerComplianceTests(SimpleTestCase):
         from search.api_views import NEWS_SOURCES
         self.assertEqual(set(FEEDS), {'news_chinanews', 'news_ithome', 'news_solidot'})
         self.assertEqual(set(NEWS_SOURCES), set(FEEDS))
+
+
+class _FakeProc(object):
+    """替身爬虫子进程：由测试决定它何时退出、退出码多少。"""
+
+    def __init__(self):
+        self.pid = 4242
+        self.returncode = None
+        self._done = threading.Event()
+
+    def finish(self, code=0):
+        self.returncode = code
+        self._done.set()
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        self._done.wait(timeout or 10)
+        return self.returncode
+
+
+class TempStateMixin(object):
+    """把采集历史 / 定时任务 / 日志目录指到临时目录，绝不碰仓库里的真文件。"""
+
+    def setUpState(self):
+        import search.crawl_manager as cm
+        self.cm = cm
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.hist = os.path.join(self.tmp.name, 'crawl_history.json')
+        self.sched = os.path.join(self.tmp.name, 'schedules.json')
+        self.logs = os.path.join(self.tmp.name, 'logs')
+        self.jobs = os.path.join(self.tmp.name, 'jobs')
+        os.makedirs(self.logs)
+        os.makedirs(self.jobs)
+        for name, value in (('HISTORY_FILE', self.hist), ('SCHEDULE_FILE', self.sched),
+                            ('LOG_DIR', self.logs), ('JOBS_DIR', self.jobs)):
+            p = patch.object(cm, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        # 告警一律拦截：测试不许真的发信
+        p = patch('search.notify.notify', return_value=False)
+        self.notify = p.start()
+        self.addCleanup(p.stop)
+
+    def read_history(self):
+        with open(self.hist, encoding='utf-8') as f:
+            return json.load(f)
+
+
+class CrawlStateTransitionTests(TempStateMixin, SimpleTestCase):
+    """终态回写必须由盯梢线程完成，而不是等前端来轮询。"""
+
+    def _start_fake(self, item_count_line):
+        """启动一次"假爬虫"，返回替身进程。"""
+        with patch.object(self.cm.subprocess, 'Popen', return_value=self.proc):
+            result = self.mgr.start(spider='news_rss')
+        self.assertTrue(result['started'], result)
+        log = self.read_history()[0]['log_path']
+        if item_count_line:
+            with open(log, 'w', encoding='utf-8') as f:
+                f.write(item_count_line)
+        return log
+
+    def setUp(self):
+        self.setUpState()
+        self.proc = _FakeProc()
+        self.mgr = self.cm.CrawlManager()
+
+    def _await_terminal(self, timeout=5):
+        """等待盯梢线程把状态推到终态；返回该行。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            row = self.read_history()[0]
+            if row['status'] != 'running':
+                return row
+            time.sleep(0.02)
+        self.fail('盯梢线程未在 {}s 内回写终态，仍在 running'.format(timeout))
+
+    def test_completed_written_without_any_poll(self):
+        """没有人调 status()/history() 也必须落终态——这是本次改动的正身。"""
+        self._start_fake("'item_scraped_count': 7,")
+        self.assertEqual(self.read_history()[0]['status'], 'running')
+        self.proc.finish(0)
+        row = self._await_terminal()
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(row['items'], 7)
+        self.assertEqual(row['returncode'], 0)
+
+    def test_zero_items_marked_empty_and_alerts(self):
+        """0 条不能算成功，且必须告警：静默停更就是这么来的。"""
+        self._start_fake(None)
+        self.proc.finish(0)
+        row = self._await_terminal()
+        self.assertEqual(row['status'], 'empty')
+        self.notify.assert_called()
+        key = self.notify.call_args[0][0]
+        self.assertEqual(key, 'crawl-empty-news_rss')
+
+    def test_nonzero_exit_marked_failed_and_alerts(self):
+        self._start_fake("'item_scraped_count': 3,")
+        self.proc.finish(1)
+        row = self._await_terminal()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(self.notify.call_args[0][0], 'crawl-failed-news_rss')
+
+    def test_start_reaps_previous_finished_run(self):
+        """上一轮已结束却没被收时，新 start 不能把旧行永远留在 running。"""
+        self._start_fake("'item_scraped_count': 2,")
+        self.proc.finish(0)
+        self._await_terminal()
+        second = _FakeProc()
+        with patch.object(self.cm.subprocess, 'Popen', return_value=second):
+            self.assertTrue(self.mgr.start(spider='aihot_hot')['started'])
+        rows = self.read_history()
+        self.assertEqual(rows[0]['status'], 'completed')      # 旧行已终态
+        self.assertEqual(rows[-1]['status'], 'running')       # 新行在跑
+        second.finish(0)
+
+    def test_stale_running_reconciled_on_startup(self):
+        """重启后 pid 已不存在的 running 行必须改判 interrupted。"""
+        with open(self.hist, 'w', encoding='utf-8') as f:
+            json.dump([{'job_id': 'job_old', 'spider': 'aihot_news',
+                        'status': 'running', 'pid': 999999}], f)
+        with patch.object(self.cm, '_pid_alive', return_value=False):
+            self.cm.CrawlManager()
+        row = self.read_history()[0]
+        self.assertEqual(row['status'], 'interrupted')
+        self.assertIn('启动收尾', row['reason'])
+
+    def test_live_running_is_not_reconciled(self):
+        """阳性对照：进程还活着时不许误判成 interrupted。"""
+        with open(self.hist, 'w', encoding='utf-8') as f:
+            json.dump([{'job_id': 'job_old', 'spider': 'news_rss',
+                        'status': 'running', 'pid': 1234}], f)
+        with patch.object(self.cm, '_pid_alive', return_value=True):
+            self.cm.CrawlManager()
+        self.assertEqual(self.read_history()[0]['status'], 'running')
+
+    def test_atomic_write_leaves_no_temp_file(self):
+        self._start_fake("'item_scraped_count': 9,")
+        self.proc.finish(0)
+        self._await_terminal()
+        self.assertFalse(os.path.exists(self.hist + '.tmp'))
+        self.read_history()  # 能解析即为完整 JSON
+
+
+class SchedulePersistenceAlertsTests(TempStateMixin, SimpleTestCase):
+    """定时任务：配置写不进去必须说出来；misfire / 回调异常必须可见。"""
+
+    def setUp(self):
+        self.setUpState()
+        self.mgr = self.cm.ScheduleManager()
+
+    def test_add_persists_and_reports_success(self):
+        """阳性对照：正常路径落盘 + 返回 job_id + scheduler_active。"""
+        with patch.object(self.mgr, '_add_to_scheduler', return_value=True):
+            r = self.mgr.add('news_rss', '0 8 * * *')
+        self.assertTrue(r['ok'], r)
+        self.assertTrue(r['scheduler_active'])
+        with open(self.sched, encoding='utf-8') as f:
+            saved = json.load(f)
+        self.assertEqual(list(saved['jobs'].values())[0]['spider'], 'news_rss')
+
+    def test_add_rolls_back_when_write_fails(self):
+        """写盘失败不能返回"创建成功"：旧实现就是这里让 cron 悄悄消失的。"""
+        with patch.object(self.mgr, '_save', return_value=False), \
+             patch.object(self.mgr, '_add_to_scheduler', return_value=True):
+            r = self.mgr.add('news_rss', '0 8 * * *')
+        self.assertFalse(r['ok'])
+        self.assertIn('写入失败', r['reason'])
+        self.assertEqual(self.mgr._jobs, {})
+
+    def test_save_returns_false_and_alerts_on_io_error(self):
+        """_save 自身的失败路径：返回 False + 告警，但不抛（不能让 API 500 崩在半路）。"""
+        with patch.object(self.cm, '_write_json_atomic', side_effect=OSError('磁盘只读')):
+            self.assertFalse(self.mgr._save())
+        self.assertEqual(self.notify.call_args[0][0], 'schedule-save')
+
+    def test_toggle_reports_write_failure(self):
+        with patch.object(self.mgr, '_add_to_scheduler', return_value=True):
+            job_id = self.mgr.add('news_rss', '0 8 * * *')['job_id']
+        with patch.object(self.mgr, '_save', return_value=False):
+            r = self.mgr.toggle(job_id, False)
+        self.assertFalse(r['ok'])
+        self.assertIn('重启后回到旧值', r['reason'])
+
+    def test_corrupt_schedule_file_is_backed_up(self):
+        """配置损坏时要留下现场，而不是让它被下一次保存覆盖掉。"""
+        with open(self.sched, 'w', encoding='utf-8') as f:
+            f.write('{"jobs": {"x": {"cron"')  # 截断的 JSON
+        self.cm.ScheduleManager()
+        backups = [n for n in os.listdir(self.tmp.name) if '.corrupt-' in n]
+        self.assertEqual(len(backups), 1)
+        with open(os.path.join(self.tmp.name, backups[0]), encoding='utf-8') as f:
+            self.assertIn('"jobs"', f.read())
+        self.notify.assert_called()
+        self.assertEqual(self.notify.call_args[0][0], 'schedule-corrupt')
+
+    def test_jobs_registered_with_misfire_grace(self):
+        """错过触发窗口要在宽限期内补跑，且多次错过合并成一次。"""
+        class FakeScheduler(object):
+            def __init__(self):
+                self.added = {}
+
+            def add_job(self, func, **kw):
+                self.added[kw['id']] = kw
+
+        fake = FakeScheduler()
+        with patch.object(self.mgr, '_get_scheduler', return_value=fake):
+            self.mgr._add_to_scheduler('j1', {'cron': '0 8 * * *', 'spider': 'news_rss'})
+        kw = fake.added['j1']
+        self.assertEqual(kw['misfire_grace_time'], self.cm._MISFIRE_GRACE)
+        self.assertTrue(kw['coalesce'])
+        self.assertEqual(kw['max_instances'], 1)
+
+    def test_add_to_scheduler_failure_is_reported_not_swallowed(self):
+        class Boom(object):
+            def add_job(self, func, **kw):
+                raise RuntimeError('注册失败')
+
+        with patch.object(self.mgr, '_get_scheduler', return_value=Boom()):
+            self.assertFalse(self.mgr._add_to_scheduler('j1', {'cron': '0 8 * * *'}))
+        self.assertEqual(self.notify.call_args[0][0], 'schedule-add-failed')
+
+    def _event(self, code, job_id='j1'):
+        return type('Ev', (), {'code': code, 'job_id': job_id})()
+
+    def test_missed_event_becomes_visible_history(self):
+        from apscheduler.events import EVENT_JOB_MISSED
+        self.mgr._jobs['j1'] = {'spider': 'news_rss', 'cron': '0 8 * * *', 'enabled': True}
+        self.mgr._on_scheduler_event(self._event(EVENT_JOB_MISSED))
+        self.assertEqual(self.mgr._jobs['j1']['last_status'], 'misfired')
+        self.assertEqual(self.mgr._history[-1]['status'], 'misfired')
+        self.assertEqual(self.notify.call_args[0][0], 'schedule-misfired')
+
+    def test_error_event_becomes_visible_history(self):
+        from apscheduler.events import EVENT_JOB_ERROR
+        self.mgr._jobs['j1'] = {'spider': 'aihot_news', 'cron': '0 8 * * *', 'enabled': True}
+        self.mgr._on_scheduler_event(self._event(EVENT_JOB_ERROR))
+        self.assertEqual(self.mgr._jobs['j1']['last_status'], 'error')
+        self.assertEqual(self.notify.call_args[0][0], 'schedule-error')
+
+    def test_trigger_records_last_fire_on_job(self):
+        """没有"上次触发"就看不出"从没触发过"：next_run 一直在，历史却可能是空的。"""
+        self.mgr._jobs['j1'] = {'spider': 'news_rss', 'cron': '0 8 * * *', 'enabled': True}
+        with patch.object(self.cm, 'crawl_manager') as mock_cm:
+            mock_cm.start.return_value = {'started': True}
+            self.mgr._trigger('j1')
+        job = self.mgr._jobs['j1']
+        self.assertEqual(job['last_status'], 'started')
+        self.assertTrue(job['last_fire'])
+        listed = self.mgr.list()
+        self.assertEqual(listed['jobs'][0]['last_fire'], job['last_fire'])
+
+    def test_pid_alive_semantics(self):
+        self.assertTrue(self.cm._pid_alive(None))          # 无 pid：宁可判活
+        self.assertTrue(self.cm._pid_alive(os.getpid()))   # 自己肯定活着
+        self.assertFalse(self.cm._pid_alive('abc'))        # 非法值按已死

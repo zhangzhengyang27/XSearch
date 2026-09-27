@@ -204,6 +204,15 @@ API_TOKEN = os.getenv("API_TOKEN", "")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
+# ---------- 采集失败/停更告警（邮件，见 search/notify.py） ----------
+# QQ/163 等邮箱要用"SMTP 授权码"而非登录密码；未启用时 notify() 是 no-op。
+ALERT_EMAIL_ENABLED = os.getenv("ALERT_EMAIL_ENABLED", "False").lower() in ("true", "1", "yes")
+ALERT_SMTP_HOST = os.getenv("ALERT_SMTP_HOST", "smtp.qq.com")
+ALERT_SMTP_PORT = int(os.getenv("ALERT_SMTP_PORT", "465") or 465)
+ALERT_SMTP_USER = os.getenv("ALERT_SMTP_USER", "")
+ALERT_SMTP_PASSWORD = os.getenv("ALERT_SMTP_PASSWORD", "")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")  # 逗号分隔；留空则发给 USER
+
 _local_settings = os.path.join(BASE_DIR, "local_settings.py")
 if os.path.exists(_local_settings):
     # 在模块全局命名空间中执行，覆盖上面的默认值
