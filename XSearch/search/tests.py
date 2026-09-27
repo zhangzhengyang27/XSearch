@@ -1236,3 +1236,67 @@ class DocDetailTests(SimpleTestCase):
             body = json.loads(api_search(
                 self.factory.get('/api/search/', {'q': '某模型'})).content)
         self.assertEqual(body['results'][0]['id'], self.DOC_ID)
+
+
+class SeoTests(SimpleTestCase):
+    """robots / sitemap：SPA 站要能被索引，这两条是最低成本的正解。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _robots(self):
+        from search.seo_views import robots_txt
+        return robots_txt(self.factory.get('/robots.txt'))
+
+    def _sitemap(self):
+        from search.seo_views import sitemap_xml
+        return sitemap_xml(self.factory.get('/sitemap.xml'))
+
+    def test_robots_blocks_admin_paths_and_points_to_sitemap(self):
+        resp = self._robots()
+        text = resp.content.decode()
+        self.assertTrue(resp['Content-Type'].startswith('text/plain'))
+        for path in ('/crawl', '/dbadmin', '/login', '/admin/'):
+            self.assertIn('Disallow: {}'.format(path), text)
+        self.assertIn('Sitemap: http://testserver/sitemap.xml', text)
+
+    def test_sitemap_lists_sections_and_ai_detail_urls(self):
+        hits = {"hits": {"total": {"value": 1}, "hits": [
+            {"_id": "DOC-1", "_source": {"create_date": "2026-09-27T01:00:00Z"}}]}}
+        with patch('search.seo_views.client') as c, patch('search.seo_views.redis_cli') as r:
+            r.get.return_value = None
+            c.search.return_value = hits
+            text = self._sitemap().content.decode()
+        self.assertIn('<urlset', text)
+        self.assertIn('<loc>http://testserver/ai</loc>', text)
+        self.assertIn('<loc>http://testserver/ai/detail?id=DOC-1</loc>', text)
+        self.assertIn('<lastmod>2026-09-27</lastmod>', text)
+
+    def test_sitemap_only_offers_pages_that_exist(self):
+        """新闻条目没有详情页（正文在源站），列进 sitemap 收录不到东西。"""
+        with patch('search.seo_views.client') as c, patch('search.seo_views.redis_cli') as r:
+            r.get.return_value = None
+            c.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+            self._sitemap()
+            kwargs = c.search.call_args[1]
+        self.assertEqual(sorted(kwargs['query']['terms']['source']),
+                         sorted(['aihot_news', 'aihot_daily', 'aihot_hot']))
+
+    def test_sitemap_degrades_to_sections_when_es_down(self):
+        """ES 挂了不能让爬虫吃到 500：降级成只输出栏目页。"""
+        with patch('search.seo_views.client') as c, patch('search.seo_views.redis_cli') as r:
+            r.get.return_value = None
+            c.search.side_effect = ConnectionError('es down')
+            resp = self._sitemap()
+        self.assertEqual(resp.status_code, 200)
+        text = resp.content.decode()
+        self.assertIn('<loc>http://testserver/search</loc>', text)
+        self.assertNotIn('/ai/detail?id=', text)
+
+    def test_sitemap_served_from_cache_without_hitting_es(self):
+        canned = '<?xml version="1.0"?><urlset/>'
+        with patch('search.seo_views.client') as c, patch('search.seo_views.redis_cli') as r:
+            r.get.return_value = canned
+            text = self._sitemap().content.decode()
+        self.assertEqual(text, canned)
+        c.search.assert_not_called()

@@ -7,6 +7,8 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.generic import View
 
+from search.seo_views import robots_txt, sitemap_xml
+
 from search.api_views import (api_admin_login, api_admin_logout,
                               api_crawl_start, api_crawl_status,
                               api_crawl_spiders, api_crawl_history, api_crawl_stats,
@@ -39,6 +41,9 @@ urlpatterns = [
     path('api/suggest/', api_suggest, name="api-suggest"),
     path('api/stats/', api_stats, name="api-stats"),
     path('api/health/', api_health, name="api-health"),
+    # 搜索引擎入口（顶层路径，nginx 需单独转发这两条）
+    path('robots.txt', robots_txt, name="robots"),
+    path('sitemap.xml', sitemap_xml, name="sitemap"),
     path('api/rankings/', api_rankings, name="api-rankings"),
     path('api/auth/login/', api_admin_login, name="api-auth-login"),
     path('api/auth/logout/', api_admin_logout, name="api-auth-logout"),
