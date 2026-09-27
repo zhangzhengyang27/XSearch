@@ -122,7 +122,6 @@ class DouyinHotSpider(scrapy.Spider):
 
         解析策略：按行扫描，遇到"XX万热度"行时，取前面最近的非空行作为标题。
         """
-        import re
         items = []
         lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
 

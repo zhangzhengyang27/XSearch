@@ -1,0 +1,13 @@
+# 只门禁"真错误"：E9 语法/致命问题 + F pyflakes（未定义名、无用导入）。
+# 刻意不启用风格类规则集——对一个 6.5k 行的既有代码库做批量风格改造，
+# 风险（踩碎隐式契约、淹没真实 diff）远大于收益。要收紧再逐条加。
+line-length = 120
+extend-exclude = ["frontend/node_modules", "frontend/dist", "XSearch/static"]
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# Django 脚手架文件：模板自带的导入不是问题，改它只会制造噪音
+"XSearch/manage.py" = ["F401"]
+"XSearch/search/admin.py" = ["F401"]

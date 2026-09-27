@@ -58,8 +58,11 @@ RUN mkdir -p cache/images jobs logs
 EXPOSE 8000
 
 # 健康检查（python:3.12-slim 不带 curl，用 python 标准库探测）
+# 打 /api/health/：它会真问 ES 与 Redis，任一挂掉返回 503 → urlopen 抛错 → 判为
+# unhealthy。以前打的是 /api/stats/，那个视图把依赖故障降级成 200 + es_ok:false，
+# 于是 ES 死了容器一直显示 healthy，停更只能靠人打开网站撞见。
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/stats/', timeout=5)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/', timeout=5)" || exit 1
 
 # 启动命令
 # 先 migrate，再启动 gunicorn（生产环境）

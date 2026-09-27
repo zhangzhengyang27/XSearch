@@ -516,12 +516,33 @@ class CrawlEndpointAuthTests(SimpleTestCase):
                                  content_type='application/json',
                                  **({'HTTP_X_ADMIN_TOKEN': token} if token else {}))
 
-    @override_settings(API_TOKEN='')
-    def test_crawl_start_requires_admin_even_without_api_token(self):
-        """API_TOKEN 留空（默认值）时也必须 401——它是可选鉴权，不该是写接口的唯一门槛。"""
+    def test_crawl_start_requires_admin(self):
+        """匿名（含只带已废弃的 X-API-Token）一律 401：管理员 token 是唯一门槛。"""
         from search.api_views import api_crawl_start
         resp = api_crawl_start(self._post('/api/crawl/start/', {'spider': 'news_rss'}))
         self.assertEqual(resp.status_code, 401)
+        req = self.factory.post('/api/crawl/start/', data=json.dumps({'spider': 'news_rss'}),
+                                content_type='application/json', HTTP_X_API_TOKEN='whatever')
+        self.assertEqual(api_crawl_start(req).status_code, 401,
+                         'API_TOKEN 层已移除，不能再成为第二条通路')
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_schedule_writes_work_with_admin_token_alone(self):
+        """定时任务写接口只要管理员 token 就能用。
+
+        以前还叠了一层可选的 API_TOKEN：服务端一旦设了它，浏览器就必须把
+        共享密钥打进 dist 才能用——那等于公开仓库里挂着钥匙。
+        """
+        from search.api_views import api_admin_login, api_schedule_add
+        token = json.loads(api_admin_login(self._post(
+            '/api/auth/login/', {'username': 'admin', 'password': 'secret'})).content)['token']
+        with patch('search.api_views.schedule_manager') as mgr:
+            mgr.add.return_value = {'ok': True, 'job_id': 'job_1'}
+            resp = api_schedule_add(self._post('/api/crawl/schedule/add/',
+                                               {'spider': 'news_rss', 'cron': '0 8 * * *'},
+                                               token=token))
+        self.assertEqual(resp.status_code, 201, resp.content)
+        mgr.add.assert_called_once()
 
     def test_crawl_status_requires_admin(self):
         """状态响应含日志尾部与服务器绝对路径，不得匿名可读。"""
@@ -1016,3 +1037,64 @@ class NotifyTests(SimpleTestCase):
         self.notify._recent['k'] = time.time() - self.notify._COOLDOWN - 1
         with patch.object(self.notify, '_send'):
             self.assertTrue(self.notify.notify('k', '冷却已过'))
+
+
+class HealthEndpointTests(SimpleTestCase):
+    """/api/health 必须真的探依赖：镜像 HEALTHCHECK 打的正是它。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        p_es = patch('search.api_views.client')
+        p_rd = patch('search.api_views.redis_cli')
+        self.mock_es = p_es.start()
+        self.mock_rd = p_rd.start()
+        self.mock_es.count.return_value = {'count': 0}   # 默认给个能序列化的形状
+        self.addCleanup(p_es.stop)
+        self.addCleanup(p_rd.stop)
+
+    def _get(self):
+        from search.api_views import api_health
+        return api_health(self.factory.get('/api/health/'))
+
+    def _body(self, resp):
+        return json.loads(resp.content)
+
+    def test_all_deps_up_returns_200(self):
+        self.mock_es.count.return_value = {'count': 1234}
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        body = self._body(resp)
+        self.assertEqual(body['status'], 'ok')
+        self.assertEqual(body['checks'], {'elasticsearch': 'ok', 'redis': 'ok'})
+        self.assertEqual(body['index']['docs'], 1234)
+
+    def test_es_down_returns_503(self):
+        """ES 挂了必须是 503：旧探针打 /api/stats，那里降级成 200 → 容器永远 healthy。"""
+        self.mock_es.info.side_effect = ConnectionError('boom')
+        resp = self._get()
+        self.assertEqual(resp.status_code, 503)
+        body = self._body(resp)
+        self.assertEqual(body['status'], 'degraded')
+        self.assertEqual(body['checks']['elasticsearch'], 'ConnectionError')
+
+    def test_redis_down_alone_still_503(self):
+        self.mock_rd.ping.side_effect = OSError('redis down')
+        resp = self._get()
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(self._body(resp)['checks']['redis'], 'OSError')
+
+    def test_error_message_not_leaked(self):
+        """只回异常类名：异常消息里常带 ES 地址等内部信息，公网探针不该吐出来。"""
+        self.mock_es.info.side_effect = ConnectionError(
+            'Connection refused by host http://10.0.0.7:9200 with auth secret-token')
+        text = self._get().content.decode()
+        for secret in ('10.0.0.7', '9200', 'secret-token', 'Connection refused'):
+            self.assertNotIn(secret, text)
+
+    def test_missing_index_does_not_fail_health(self):
+        """首次部署索引还没建：报告 docs=None，但不能因此判容器死。"""
+        from elasticsearch import NotFoundError
+        self.mock_es.count.side_effect = NotFoundError(404, 'index_not_found', {})
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(self._body(resp)['index']['docs'])

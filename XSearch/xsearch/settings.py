@@ -193,11 +193,6 @@ ES_INDEX = os.getenv("ES_INDEX", "quotes")
 # ---------- Redis 配置（支持环境变量覆盖） ----------
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 
-# ---------- API 鉴权（面向非浏览器客户端） ----------
-# 设置后定时任务配置类接口额外要求请求头 X-API-Token 匹配；留空 = 不启用。
-# 浏览器侧的写接口（爬虫启动等）不依赖它——共享密钥无法安全地打进前端产物。
-API_TOKEN = os.getenv("API_TOKEN", "")
-
 # ---------- 管理员账号（「采集管理」页登录） ----------
 # 优先读环境变量，再由 XSearch/local_settings.py（已 gitignore，严禁提交）覆盖；
 # 两者都未配置时登录接口直接拒绝，采集管理不可用

@@ -1,6 +1,6 @@
 // 后端 API 封装：开发态走 Vite 代理（/api -> 127.0.0.1:8000）
 // 生产部署可用 VITE_API_BASE 指向后端绝对地址
-// 后端设置 API_TOKEN 时，前端构建时注入 VITE_API_TOKEN 即可自动携带
+// 鉴权只有管理员 token 一层；构建产物里不含任何共享密钥
 import { adminToken, clearAuth, isAdminPath } from './auth'
 
 // ---- 接口响应类型（字段与后端 search/api_views.py、crawl_manager.py 一一对应） ----
@@ -184,10 +184,9 @@ interface RequestOptions extends RequestInit {
 }
 
 const BASE = import.meta.env.VITE_API_BASE || ''
-const TOKEN = import.meta.env.VITE_API_TOKEN || ''
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const headers: Record<string, string> = TOKEN ? { 'X-API-Token': TOKEN, ...extra } : { ...extra }
+  const headers: Record<string, string> = { ...extra }
   if (adminToken.value) headers['X-Admin-Token'] = adminToken.value
   return headers
 }

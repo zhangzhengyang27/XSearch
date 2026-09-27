@@ -1,5 +1,7 @@
 # XSearch — 分布式爬虫与全文检索站
 
+[![CI](https://github.com/zhangzhengyang27/XSearch/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangzhengyang27/XSearch/actions/workflows/ci.yml)
+
 基于 Scrapy + Elasticsearch + Django + Vue3 的全栈搜索站，覆盖爬虫采集、数据存储、关键词搜索、采集管理完整链路。
 
 > 本项目源自慕课网《新版 Scrapy 打造搜索引擎》课程，已升级为 2026 年技术栈，并按公开站点的标准做过一轮安全与合规收口（见「发布清单」）。
@@ -153,14 +155,16 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 ## API 接口
 
 鉴权方式：**公开** / **管理员**（登录接口签发 token，请求头 `X-Admin-Token` 携带）/
-**管理员 + API_TOKEN**（`API_TOKEN` 非空时额外要求 `X-API-Token`，面向脚本类非浏览器客户端）。
+鉴权只有一层：**公开**（读者用的读接口）与 **管理员**（登录后请求头带 `X-Admin-Token`）。
+不再有第二层 `API_TOKEN`——它要生效必须打进前端产物，而公开仓库里的 dist 等于把钥匙挂出去。
 
 | 接口 | 方法 | 鉴权 | 说明 |
 |---|---|---|---|
 | `/` | GET | 公开 | 服务自描述（版本 + 端点清单） |
 | `/api/search/` | GET | 公开 | 关键词搜索（`source` 筛选、`sort`、`days`、分页） |
 | `/api/suggest/` | GET | 公开 | 搜索建议 |
-| `/api/stats/` | GET | 公开 | 数据概览统计 |
+| `/api/stats/` | GET | 公开 | 数据概览统计（依赖故障会降级成 `es_ok:false`，**不适合当探针**） |
+| `/api/health/` | GET | 公开 | 存活探针：真问 ES/Redis，任一不可用返回 **503**（镜像 HEALTHCHECK 打的就是它） |
 | `/api/rankings/` | GET | 公开 | 榜单 / 新闻列表（AI 热点榜、抖音榜 + 新闻各源 + AI 日报） |
 | `/api/ai/item/` | GET | 公开 | AI 条目详情（按标题检索本地 ES） |
 | `/api/img/` | GET | 公开 | 图片代理（本地磁盘缓存，域名白名单） |
@@ -173,7 +177,7 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 | `/api/crawl/resumable/` | GET | 管理员 | 可恢复的中断任务（JOBDIR 列表） |
 | `/api/crawl/spiders/` | GET | 管理员 | 可用爬虫列表（白名单） |
 | `/api/crawl/schedule/` | GET | 管理员 | 定时任务列表 |
-| `/api/crawl/schedule/{add,remove,update,toggle}/` | POST | 管理员 + API_TOKEN | 定时任务增删改停 |
+| `/api/crawl/schedule/{add,remove,update,toggle}/` | POST | 管理员 | 定时任务增删改停 |
 | `/api/admin/db/overview/` | GET | 管理员 | 索引概览：文档数/大小/来源分布 |
 | `/api/admin/db/docs/` | GET | 管理员 | 文档分页浏览（`source`/`q`/`p`） |
 | `/api/admin/db/doc/<id>/` | GET/PUT/DELETE | 管理员 | 单文档详情/编辑（字段白名单）/删除 |
@@ -206,7 +210,6 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 | `ES_INDEX` | `quotes` | 文档索引名（历史遗留命名，见 `crawler/pipelines.py`） |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis 连接 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | （空） | 管理员账号，建议写在 `XSearch/local_settings.py`（不入 git） |
-| `API_TOKEN` | （空） | 非浏览器客户端的额外令牌；留空不启用。浏览器侧写接口不依赖它 |
 | `ALERT_EMAIL_ENABLED` | `False` | 开启采集失败 / 0 条 / 定时任务 misfire 的邮件告警 |
 | `ALERT_SMTP_HOST` / `_PORT` | `smtp.qq.com` / `465` | SMTP 服务器（SSL） |
 | `ALERT_SMTP_USER` / `_PASSWORD` | （空） | 发信账号与 **SMTP 授权码**（QQ/163 非登录密码） |
@@ -234,16 +237,20 @@ docker compose exec backend scrapy crawl news_rss
 
 ```bash
 cd XSearch
-python manage.py test search
+python manage.py test search     # 85 条，全部 mock 依赖，本机不需要起 ES/Redis
 ```
 
 覆盖：API 参数校验、CORS、管理员登录/登出/401、**登录限速与解锁**、**采集接口鉴权**、
-**resume_job 路径穿越拦截**、ES 异常降级、数据管理读写、cron 校验、正文清洗、
-**robots 合规与指纹伪装域名边界**、已移除模块不得回流、
+**resume_job 路径穿越拦截**、**/api/health 真检依赖且不泄露错误细节**、ES 异常降级、
+数据管理读写、cron 校验、正文清洗、**robots 合规与指纹伪装域名边界**、已移除模块不得回流、
 **采集终态无轮询回写 / 僵尸 running 收尾 / 原子写与写失败如实返回 / misfire 参数 /
 调度事件可见化 / 告警模块（假 SMTP）**。
 
-前端暂无自动化测试，构建时由 `vue-tsc --noEmit` 做类型检查（`npm run build`）。
+前端无单测框架，构建期由 `vue-tsc --noEmit` 做全量类型检查（`npm run build`）。
+
+CI（`.github/workflows/ci.yml`）在每次 push / PR 上跑：`ruff check`（只门禁 E9 语法 + F
+pyflakes，见 `ruff.toml`）→ Django 测试 → 前端 `npm ci` + 构建 → 产物体积守门。
+`requirements-lock.txt` 与 CI 用同一份依赖，避免"CI 绿、镜像里红"。
 
 ## 发布清单（公网部署前）
 

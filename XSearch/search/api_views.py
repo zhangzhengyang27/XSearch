@@ -6,6 +6,7 @@
         GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
         GET  /api/suggest?s=        搜索框补全
         GET  /api/stats             数据概览（总量/来源分布/热搜词）
+        GET  /api/health            存活探针（真检 ES/Redis，故障返回 503）
         GET  /api/rankings          榜单 / 新闻列表
         GET  /api/ai/item           AI 条目详情
         GET  /api/img               图片代理
@@ -16,6 +17,10 @@
         「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
         与「数据管理」接口（ES 文档浏览/编辑/删除/清理）
     免鉴权：POST /api/auth/login（按 IP 限速，见 _login_locked_for / _login_record_failure）
+
+鉴权只有一层：管理员 token。历史上另有可选的 API_TOKEN（X-API-Token），
+但它要生效必须打进前端产物，公开仓库里的 dist 等于钥匙，且所有受保护接口
+本来就已要求管理员登录 —— 2026-09 整体移除，不再保留半死的第二层。
 
 所有接口在 ES/Redis 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
@@ -56,22 +61,6 @@ logger = logging.getLogger(__name__)
 
 def _es_error(e):
     return JsonResponse({"error": "Elasticsearch 不可用: {}".format(e)}, status=503)
-
-
-def require_api_token(view):
-    """可选鉴权：settings.API_TOKEN 非空时要求请求头 X-API-Token 匹配。
-
-    仅用于非浏览器客户端（脚本/内部调用）。浏览器侧的写接口一律走
-    require_admin——API_TOKEN 无法安全地打进前端产物，公开仓库里的
-    dist 一旦被下载就等于钥匙公开。
-    """
-    @functools.wraps(view)
-    def wrapped(request, *args, **kwargs):
-        token = getattr(settings, "API_TOKEN", "")
-        if token and request.headers.get("X-API-Token", "") != token:
-            return JsonResponse({"error": "无效的 API Token"}, status=401)
-        return view(request, *args, **kwargs)
-    return wrapped
 
 
 # ---- 管理员登录（「采集管理」页鉴权）----
@@ -450,6 +439,38 @@ def api_stats(request):
     return JsonResponse(data)
 
 
+def api_health(request):
+    """存活探针：真去问 ES 与 Redis，任一不可用就返回 503。
+
+    为什么单独有它：/api/stats 把依赖故障降级成 200 + es_ok:false 字段，
+    而镜像的 HEALTHCHECK 打的正是 /api/stats —— 结果 ES 死了容器仍报 healthy，
+    "悄悄停更"没人知道。错误内容只回异常类名，不回消息串（避免把 ES 地址等
+    内部信息泄给公网）。
+    """
+    checks, code = {}, 200
+    try:
+        client.info()
+        checks["elasticsearch"] = "ok"
+    except Exception as e:
+        checks["elasticsearch"] = type(e).__name__
+        code = 503
+    try:
+        redis_cli.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = type(e).__name__
+        code = 503
+    # 索引状态只报告不参与判定：首次部署索引还没建，不该因此把容器判死。
+    # 取不到/形状不对一律归为 None——探针自己抛 500 比什么都糟。
+    try:
+        docs = int(client.count(index=INDEX)["count"])
+    except Exception:
+        docs = None
+    return JsonResponse({"status": "ok" if code == 200 else "degraded",
+                         "checks": checks,
+                         "index": {"name": INDEX, "docs": docs}}, status=code)
+
+
 # 新闻来源：news_rss 爬虫入库的 3 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
 # 人民网（news_people）已停用：其 RSS 自 2025-06 起不再更新，见 spiders/news_rss.py 说明。
 # 已入库的 news_people 文档仍可通过 /api/search 检索到，故保留在前端来源标签映射里。
@@ -647,7 +668,6 @@ def api_schedule_list(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_add(request):
@@ -674,7 +694,6 @@ def api_schedule_add(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_remove(request):
@@ -690,7 +709,6 @@ def api_schedule_remove(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_update(request):
@@ -716,7 +734,6 @@ def api_schedule_update(request):
 
 
 @require_admin
-@require_api_token
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_schedule_toggle(request):
