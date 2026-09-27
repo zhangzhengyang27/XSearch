@@ -7,14 +7,19 @@
 #   docker-compose up -d
 #
 # 采集数据：
-#   docker-compose exec backend scrapy crawl bilibili_hot
+#   docker-compose exec backend scrapy crawl news_rss
 
 version: "3.8"
 
 services:
   # ===== Elasticsearch =====
+  # 必须自带 IK 分词：crawler/pipelines.py 建索引时用 ik_max_word / ik_smart，
+  # 官方镜像没有 IK 插件，直接起 stock 镜像会在第一次采集时建索引失败
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    build:
+      context: .
+      dockerfile: deploy/es-ik.Dockerfile
+    image: xsearch-es-ik:8.15.3
     container_name: xsearch-elasticsearch
     environment:
       - discovery.type=single-node
@@ -26,8 +31,9 @@ services:
         hard: -1
     volumes:
       - es_data:/usr/share/elasticsearch/data
+    # 只绑回环：xpack.security 是关的，9200/6379 暴露到局域网等于把索引裸奔
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
@@ -44,7 +50,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

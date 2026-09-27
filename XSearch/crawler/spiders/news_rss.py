@@ -2,16 +2,20 @@
 """
 新闻 RSS 聚合爬虫：抓官方 RSS 源写入 ES "quotes" 索引（可搜索）。
 
-RSS 是网站官方分发格式，抓取合规且无需对抗反爬。内置 4 个源（2026-09-09 实测可用）：
-    news_people     人民网综合新闻   http://www.people.com.cn/rss/politics.xml  （feed 含摘要，约100条）
+RSS 是网站官方分发格式，抓取合规且无需对抗反爬。内置 3 个源（2026-09-27 实测可用）：
     news_chinanews  中国新闻网滚动   https://www.chinanews.com/rss/scroll-news.xml
                     （feed 无摘要，自动跟进文章页抓 div.left_zw 正文）
     news_ithome     IT之家科技新闻   https://www.ithome.com/rss/  （description 为正文开头）
     news_solidot    Solidot 科技    https://www.solidot.org/index.rss
 
+已停用：news_people（人民网）。2026-09-27 实测其 /rss/*.xml 全部 feed 的 101 个
+pubDate 冻结在 2025-06-03~06-05，即站方已停止更新 RSS；再采集只会用 md5(url)
+反复覆盖同一批 16 个月前的旧文档，并让「新闻列表」出现"最新新闻是去年"的观感。
+入库的既有 news_people 文档保留，可按需 /api/admin/db/purge/ 清理。
+
 试跑：
-    scrapy crawl news_rss                                  # 全部 4 个源
-    scrapy crawl news_rss -a sources=news_people,news_solidot   # 指定源
+    scrapy crawl news_rss                                  # 全部 3 个源
+    scrapy crawl news_rss -a sources=news_chinanews,news_solidot   # 指定源
 
 去重：url 的 md5 作为 ES _id，重复抓取自动覆盖更新，可放心配定时任务每天跑。
 """
@@ -25,11 +29,6 @@ import scrapy
 
 # RSS 源配置：key 即写入 ES 的 source 字段
 FEEDS = {
-    "news_people": {
-        "label": "人民网",
-        "url": "http://www.people.com.cn/rss/politics.xml",
-        "follow_links": False,   # feed 自带摘要，无需跟进正文页
-    },
     "news_chinanews": {
         "label": "中国新闻网",
         "url": "https://www.chinanews.com/rss/scroll-news.xml",
@@ -71,7 +70,7 @@ def strip_html(text):
 
 
 def parse_date(text):
-    """兼容两种 feed 日期格式：RFC822（IT之家/Solidot）与 YYYY-MM-DD（人民网）。"""
+    """兼容两种 feed 日期格式：RFC822（IT之家/Solidot）与 YYYY-MM-DD HH:MM:SS。"""
     text = (text or "").strip()
     if not text:
         return None
@@ -97,7 +96,7 @@ class NewsRssSpider(scrapy.Spider):
 
     def __init__(self, sources="", *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # -a sources=news_people,news_ithome 指定源；默认全部
+        # -a sources=news_chinanews,news_ithome 指定源；默认全部
         keys = [k.strip() for k in sources.split(",") if k.strip()] if sources else list(FEEDS)
         unknown = [k for k in keys if k not in FEEDS]
         if unknown:

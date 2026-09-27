@@ -2,7 +2,7 @@
 """
 下载中间件（AI 时代方案）。
 
-- BrowserFingerprintHeadersMiddleware : 整组自洽浏览器指纹头（UA + sec-ch-ua + Accept…）
+- BrowserFingerprintHeadersMiddleware : 整组自洽浏览器指纹头（仅 FINGERPRINT_HOSTS 域名）
 - ResidentialProxyMiddleware          : 住宅代理轮换（数据中心 IP 裸奔即被封）
 - PlaywrightFallbackMiddleware        : 渲染失败自动降级直连
 
@@ -12,6 +12,7 @@
 import itertools
 import logging
 import os
+from urllib.parse import urlparse
 
 from crawler.ai.fingerprint import get_headers
 
@@ -19,22 +20,40 @@ logger = logging.getLogger(__name__)
 
 
 class BrowserFingerprintHeadersMiddleware(object):
-    """用成套的真实浏览器指纹头替换默认 UA。
+    """对白名单域名替换成成套的真实浏览器指纹头，其余域名保留自报身份的 USER_AGENT。
 
     风控会校验 UA / sec-ch-ua / sec-ch-ua-platform / Accept-Language 是否自洽，
     单独换 UA 反而是明显的爬虫特征。优先 browserforge，未安装则用内置模板。
+
+    把伪装限制在白名单域名内，是为了不让"伪装浏览器"成为全站默认行为：
+    那既扩大合规风险，也让站方无法按 UA 放行或精准封禁。
     """
 
+    def __init__(self, hosts=()):
+        self._hosts = tuple((h or "").lstrip(".").lower() for h in hosts if h)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings.getlist("FINGERPRINT_HOSTS"))
+
     def process_request(self, request):
-        # 直接替换（而非 setdefault）：Scrapy 内置 UserAgentMiddleware 会先写入
-        # 默认 UA，setdefault 会导致真实指纹头不生效（曾导致 B站 接口返回 412）
+        host = (urlparse(request.url).hostname or "").lower()
+        if not self._matches(host):
+            return None
+        # 直接替换（而非 setdefault）：内置 UserAgentMiddleware（优先级 500）已先写入
+        # USER_AGENT，setdefault 不会覆盖它，真实指纹头就不生效（曾导致 B站 接口 412）
         try:
             headers = get_headers()
         except Exception as e:
             logger.warning("指纹生成失败（%s），使用上一次/内置头", e)
-            return
+            return None
         for k, v in headers.items():
             request.headers[k] = v
+        return None
+
+    def _matches(self, host):
+        """精确匹配域名或其子域，避免 "evil-douyin.com" 命中 "douyin.com" 这类后缀假阳性。"""
+        return any(host == h or host.endswith("." + h) for h in self._hosts)
 
 
 class ResidentialProxyMiddleware(object):

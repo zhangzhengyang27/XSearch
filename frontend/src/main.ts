@@ -14,7 +14,7 @@ import StatsView from './views/StatsView.vue'
 import CrawlView from './views/CrawlView.vue'
 import DbAdminView from './views/DbAdminView.vue'
 import LoginView from './views/LoginView.vue'
-import { isAdmin } from './auth'
+import { isAdmin, ADMIN_PATHS } from './auth'
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/ai' },
@@ -35,7 +35,6 @@ const router = createRouter({
 })
 
 // 管理页仅管理员可用：未登录跳登录页（登录后回到原地址）；已登录访问 /login 直接进采集管理
-const ADMIN_PATHS = ['/crawl', '/dbadmin']
 router.beforeEach((to) => {
   if (ADMIN_PATHS.includes(to.path) && !isAdmin.value) {
     return { path: '/login', query: { next: to.fullPath } }

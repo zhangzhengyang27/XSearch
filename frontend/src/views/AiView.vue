@@ -7,7 +7,8 @@
         <el-tab-pane label="AI 热点榜" name="hot" />
       </el-tabs>
       <el-button size="small" @click="load(page)" :loading="loading">刷新</el-button>
-      <el-button size="small" type="primary" @click="recrawl" :loading="starting"
+      <!-- 采集会拉起子进程，仅管理员可见（后端 /api/crawl/* 同样要求 X-Admin-Token） -->
+      <el-button v-if="isAdmin" size="small" type="primary" @click="recrawl" :loading="starting"
                  :disabled="crawl.running">
         {{ crawl.running ? '采集中…' : '更新数据' }}
       </el-button>
@@ -16,7 +17,7 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="block" />
     <el-alert v-if="hint" :title="hint" type="info" show-icon :closable="false" class="block" />
     <el-empty v-if="!loading && !items.length"
-              description="暂无数据，点右上角「更新数据」采集" />
+              :description="isAdmin ? '暂无数据，点右上角「更新数据」采集' : '暂无数据'" />
 
     <!-- AI 精选：feed 流（LLM 摘要 + 评分） -->
     <template v-if="tab === 'selected'">
@@ -95,6 +96,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, errText, type DocItem } from '../api'
+import { isAdmin } from '../auth'
 
 const tab = ref('selected')
 const items = ref<DocItem[]>([])

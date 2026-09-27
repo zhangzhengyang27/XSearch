@@ -1,7 +1,7 @@
 // 后端 API 封装：开发态走 Vite 代理（/api -> 127.0.0.1:8000）
 // 生产部署可用 VITE_API_BASE 指向后端绝对地址
 // 后端设置 API_TOKEN 时，前端构建时注入 VITE_API_TOKEN 即可自动携带
-import { adminToken, clearAuth } from './auth'
+import { adminToken, clearAuth, isAdminPath } from './auth'
 
 // ---- 接口响应类型（字段与后端 search/api_views.py、crawl_manager.py 一一对应） ----
 
@@ -206,12 +206,15 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const resp = await fetch(BASE + path, { ...options, headers })
   const data: unknown = await resp.json().catch(() => ({}))
   if (!resp.ok) {
-    // 管理员登录态失效（排除登录接口自身的密码错误 401）：
-    // 清除本地 token 并整页跳登录页，登录后回到当前地址
+    // 管理员登录态失效（排除登录接口自身的密码错误 401）：清除本地 token。
+    // 只在管理页整页跳登录；公开页（/ai /news /rankings）就地报错——把匿名访客甩到
+    // 他看不懂、也回不来的管理登录页是净损失（采集按钮在这些页已按 isAdmin 隐藏）。
     if (resp.status === 401 && !path.startsWith('/api/auth/login')) {
       clearAuth()
-      window.location.href = '/login?next=' +
-        encodeURIComponent(location.pathname + location.search)
+      if (isAdminPath(location.pathname)) {
+        window.location.href = '/login?next=' +
+          encodeURIComponent(location.pathname + location.search)
+      }
     }
     throw new Error(errorMessage(data, resp.status))
   }

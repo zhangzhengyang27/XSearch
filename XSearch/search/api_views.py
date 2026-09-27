@@ -2,18 +2,22 @@
 """后端 JSON API（前后端分离改造后的唯一对外层）。
 
 路由（见 XSearch/urls.py）：
-    GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
-    GET  /api/suggest?s=        搜索框补全
-    GET  /api/stats             数据概览（总量/来源分布/热搜词）
-    POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
-    GET  /api/crawl/status      采集状态 + 日志尾部
-    POST /api/auth/login        管理员登录（签发 token）
-    POST /api/auth/logout       退出登录（吊销 token）
-    「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
-    与「数据管理」接口（ES 文档浏览/编辑/删除/清理）均要求
-    X-Admin-Token（require_admin），见各视图装饰器。
+    公开（无需登录）：
+        GET  /api/search?q=&p=      关键词搜索（高亮 + 分页）
+        GET  /api/suggest?s=        搜索框补全
+        GET  /api/stats             数据概览（总量/来源分布/热搜词）
+        GET  /api/rankings          榜单 / 新闻列表
+        GET  /api/ai/item           AI 条目详情
+        GET  /api/img               图片代理
+    管理员（X-Admin-Token，require_admin）：
+        POST /api/crawl/start       触发采集（子进程跑 Scrapy 爬虫）
+        GET  /api/crawl/status      采集状态 + 日志尾部
+        POST /api/auth/logout       退出登录（吊销 token）
+        「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
+        与「数据管理」接口（ES 文档浏览/编辑/删除/清理）
+    免鉴权：POST /api/auth/login（按 IP 限速，见 _login_guard）
 
-所有接口在 ES/Redis/LLM 不可用时返回结构化错误（非 500），前端据此降级展示。
+所有接口在 ES/Redis 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
 import functools
 import hmac
@@ -57,8 +61,9 @@ def _es_error(e):
 def require_api_token(view):
     """可选鉴权：settings.API_TOKEN 非空时要求请求头 X-API-Token 匹配。
 
-    本机开发态默认不启用（Token 留空即开放）；公网部署时设置 API_TOKEN
-    即可保护写操作与 AI 问答（LLM 调用有成本）。
+    仅用于非浏览器客户端（脚本/内部调用）。浏览器侧的写接口一律走
+    require_admin——API_TOKEN 无法安全地打进前端产物，公开仓库里的
+    dist 一旦被下载就等于钥匙公开。
     """
     @functools.wraps(view)
     def wrapped(request, *args, **kwargs):
@@ -101,6 +106,61 @@ def require_admin(view):
     return wrapped
 
 
+# ---- 登录限速（按客户端 IP）----
+# 与 _admin_tokens 同构，状态在进程内：当前部署为 gunicorn --workers 1（见
+# Dockerfile 注释），成立；扩容多 worker 前必须把计数外置到 Redis。
+# X-Forwarded-For 可被客户端伪造，这里仍优先取用是因为真实链路是
+# frp -> VPS nginx 反代（只看 REMOTE_ADDR 限不到攻击者）；代理不受信任时
+# 设环境变量 DJANGO_TRUST_PROXY_HEADER=False 退回 REMOTE_ADDR。
+_LOGIN_MAX_FAILS = 5      # 窗口内允许的失败次数
+_LOGIN_WINDOW = 300       # 失败计数窗口（秒）
+_LOGIN_LOCKOUT = 900      # 超限后锁定时长（秒）
+_login_failures = {}      # ip -> (fail_count, window_start, locked_until)
+
+
+def _client_ip(request):
+    if getattr(settings, "TRUST_PROXY_HEADER", True):
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if xff:
+            return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _login_locked_for(ip):
+    """返回该 IP 还需等待的秒数，0 表示未被锁定；顺带丢弃过期窗口。"""
+    now = time.time()
+    with _admin_lock:
+        rec = _login_failures.get(ip)
+        if not rec:
+            return 0
+        _count, window_start, locked_until = rec
+        if locked_until > now:
+            return int(locked_until - now) + 1
+        if now - window_start > _LOGIN_WINDOW:
+            _login_failures.pop(ip, None)
+        return 0
+
+
+def _login_record_failure(ip):
+    """记一次失败；达到阈值则上锁。"""
+    now = time.time()
+    with _admin_lock:
+        count, window_start, _until = _login_failures.get(ip, (0, now, 0))
+        if now - window_start > _LOGIN_WINDOW:
+            count, window_start = 0, now
+        count += 1
+        locked_until = now + _LOGIN_LOCKOUT if count >= _LOGIN_MAX_FAILS else 0
+        _login_failures[ip] = (count, window_start, locked_until)
+        if locked_until:
+            logger.warning("登录限速：%s 连续失败 %d 次，锁定 %d 秒",
+                           ip or "unknown", count, _LOGIN_LOCKOUT)
+
+
+def _login_clear(ip):
+    with _admin_lock:
+        _login_failures.pop(ip, None)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_admin_login(request):
@@ -111,18 +171,28 @@ def api_admin_login(request):
         return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
     username = (payload.get("username") or "").strip()
     password = (payload.get("password") or "").strip()
+    ip = _client_ip(request)
+    # 先看锁定，再做密码比较：锁定期间不再消耗比较成本，也不给爆破者反馈
+    remaining = _login_locked_for(ip)
+    if remaining:
+        resp = JsonResponse({"error": "失败次数过多，请 {} 秒后重试".format(remaining),
+                             "code": "too_many_login_attempts"}, status=429)
+        resp["Retry-After"] = str(remaining)
+        return resp
     admin_user = getattr(settings, "ADMIN_USERNAME", "")
     admin_pass = getattr(settings, "ADMIN_PASSWORD", "")
     if not admin_user or not admin_pass:
         return JsonResponse(
             {"error": "管理员账号未配置：请创建 XSearch/local_settings.py"
                       "（参考 local_settings.py.example）"},
-            status=500)
+            status=503)
     # 常数时间比较，避免时序侧信道逐步猜解账号密码
     user_ok = hmac.compare_digest(username.encode("utf-8"), admin_user.encode("utf-8"))
     pass_ok = hmac.compare_digest(password.encode("utf-8"), admin_pass.encode("utf-8"))
     if not (user_ok and pass_ok):
+        _login_record_failure(ip)
         return JsonResponse({"error": "用户名或密码错误"}, status=401)
+    _login_clear(ip)
     token = secrets.token_hex(32)
     with _admin_lock:
         _admin_tokens[token] = time.time() + _ADMIN_TOKEN_TTL
@@ -380,8 +450,10 @@ def api_stats(request):
     return JsonResponse(data)
 
 
-# 新闻来源：news_rss 爬虫入库的 4 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
-NEWS_SOURCES = ("news_people", "news_chinanews", "news_ithome", "news_solidot")
+# 新闻来源：news_rss 爬虫入库的 3 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
+# 人民网（news_people）已停用：其 RSS 自 2025-06 起不再更新，见 spiders/news_rss.py 说明。
+# 已入库的 news_people 文档仍可通过 /api/search 检索到，故保留在前端来源标签映射里。
+NEWS_SOURCES = ("news_chinanews", "news_ithome", "news_solidot")
 # AI 来源：AIHOT 精选动态 / 日报 / 热点榜（独立 AI 导航页使用）
 AI_SOURCES = ("aihot_news", "aihot_daily", "aihot_hot")
 
@@ -457,7 +529,7 @@ def api_rankings(request):
             and source not in NEWS_SOURCES and source not in AI_SOURCES):
         return JsonResponse({"error": "不支持的榜单来源"}, status=400)
 
-    # 分页时间倒序分支：新闻 4 源聚合 + 各源 + AI 日报（aihot_hot 属榜单类，走下方 rank 分支）
+    # 分页时间倒序分支：新闻 3 源聚合 + 各源 + AI 日报（aihot_hot 属榜单类，走下方 rank 分支）
     if source == "news" or source in NEWS_SOURCES or source == "aihot_daily":
         page_size = 20
         # 新闻列表 60 秒缓存：页面轮询/翻页密集，且语料分钟级变化足够
@@ -512,7 +584,7 @@ def api_rankings(request):
     return JsonResponse({"source": source, "total": len(items), "items": items})
 
 
-@require_api_token
+@require_admin
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_crawl_start(request):
@@ -540,7 +612,9 @@ def api_crawl_resumable(request):
     return JsonResponse({"jobs": crawl_manager.list_resumable_jobs()})
 
 
+@require_admin
 def api_crawl_status(request):
+    """采集状态 + 日志尾部（含服务器绝对路径，仅限管理员）。"""
     return JsonResponse(crawl_manager.status())
 
 

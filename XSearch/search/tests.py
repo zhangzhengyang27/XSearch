@@ -246,6 +246,8 @@ class AdminAuthTests(TestCase):
         self.factory = RequestFactory()
         from search import api_views
         api_views._admin_tokens.clear()
+        # 登录限速计数是进程内状态，不清空会让前面的失败用例把后面的登录打成 429
+        api_views._login_failures.clear()
 
     def _post_json(self, url, payload):
         return self.factory.post(url, data=json.dumps(payload),
@@ -278,7 +280,8 @@ class AdminAuthTests(TestCase):
         from search.api_views import api_admin_login
         resp = api_admin_login(self._post_json(
             '/api/auth/login/', {'username': 'admin', 'password': 'x'}))
-        self.assertEqual(resp.status_code, 500)
+        # 503 = 服务侧配置缺失（原 500 会被前端/监控当成程序崩溃）
+        self.assertEqual(resp.status_code, 503)
 
     def test_protected_endpoint_requires_token(self):
         """采集管理接口无 token 应返回 401（auth_required）。"""
@@ -309,6 +312,8 @@ class AdminDbTests(TestCase):
         self.factory = RequestFactory()
         from search import api_views
         api_views._admin_tokens.clear()
+        # 登录限速计数是进程内状态，不清空会让前面的失败用例把后面的登录打成 429
+        api_views._login_failures.clear()
         # 直接注入一个未过期的合法 token，避免每个用例都走登录流程
         self.token = 'testtoken'
         api_views._admin_tokens[self.token] = api_views.time.time() + 3600
@@ -491,3 +496,182 @@ class NewsRssStripHtmlTests(SimpleTestCase):
     def test_entities_unescaped(self):
         from crawler.spiders.news_rss import strip_html
         self.assertEqual(strip_html('A&amp;B &lt;tag&gt;'), 'A&B <tag>')
+
+
+class CrawlEndpointAuthTests(SimpleTestCase):
+    """采集类接口鉴权收口：这两个接口曾对匿名公网开放。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        from search import api_views
+        api_views._admin_tokens.clear()
+        api_views._login_failures.clear()
+
+    def _post(self, url, payload, token=None):
+        return self.factory.post(url, data=json.dumps(payload),
+                                 content_type='application/json',
+                                 **({'HTTP_X_ADMIN_TOKEN': token} if token else {}))
+
+    @override_settings(API_TOKEN='')
+    def test_crawl_start_requires_admin_even_without_api_token(self):
+        """API_TOKEN 留空（默认值）时也必须 401——它是可选鉴权，不该是写接口的唯一门槛。"""
+        from search.api_views import api_crawl_start
+        resp = api_crawl_start(self._post('/api/crawl/start/', {'spider': 'news_rss'}))
+        self.assertEqual(resp.status_code, 401)
+
+    def test_crawl_status_requires_admin(self):
+        """状态响应含日志尾部与服务器绝对路径，不得匿名可读。"""
+        from search.api_views import api_crawl_status
+        resp = api_crawl_status(self.factory.get('/api/crawl/status/'))
+        self.assertEqual(resp.status_code, 401)
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_crawl_start_with_valid_token_passes(self):
+        """阳性对照：合法 token 必须放行，否则上面的 401 可能只是守卫写死了。"""
+        from search.api_views import api_admin_login, api_crawl_start
+        token = json.loads(api_admin_login(self._post(
+            '/api/auth/login/', {'username': 'admin', 'password': 'secret'})).content)['token']
+        with patch('search.api_views.crawl_manager') as mock_mgr:
+            mock_mgr.start.return_value = {"started": True, "pid": 4242}
+            resp = api_crawl_start(self._post('/api/crawl/start/',
+                                              {'spider': 'news_rss'}, token=token))
+        self.assertEqual(resp.status_code, 202)
+        mock_mgr.start.assert_called_once()
+
+
+class LoginRateLimitTests(SimpleTestCase):
+    """登录按 IP 限速：防公网对管理员口令的暴力猜解。"""
+
+    def setUp(self):
+        from search import api_views
+        api_views._admin_tokens.clear()
+        api_views._login_failures.clear()
+
+    def tearDown(self):
+        from search import api_views
+        api_views._login_failures.clear()
+
+    def _login(self, password, ip='203.0.113.7'):
+        from search.api_views import api_admin_login
+        return api_admin_login(RequestFactory().post(
+            '/api/auth/login/',
+            data=json.dumps({'username': 'admin', 'password': password}),
+            content_type='application/json', HTTP_X_FORWARDED_FOR=ip))
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_locks_after_max_failures(self):
+        from search import api_views
+        for i in range(api_views._LOGIN_MAX_FAILS):
+            self.assertEqual(self._login('bad').status_code, 401,
+                             '第 {} 次失败应仍是 401'.format(i + 1))
+        locked = self._login('secret')
+        self.assertEqual(locked.status_code, 429)
+        self.assertEqual(json.loads(locked.content)['code'], 'too_many_login_attempts')
+        self.assertGreater(int(locked['Retry-After']), 0)
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_success_clears_failure_window(self):
+        """未触顶前登录成功要清零计数，否则正常用户会被累积失败次数误锁。"""
+        from search import api_views
+        for _ in range(api_views._LOGIN_MAX_FAILS - 1):
+            self._login('bad')
+        self.assertEqual(self._login('secret').status_code, 200)
+        self.assertEqual(api_views._login_failures, {})
+
+    @override_settings(ADMIN_USERNAME='admin', ADMIN_PASSWORD='secret')
+    def test_limit_is_per_ip(self):
+        """锁定只作用于攻击者自己的 IP，不能把其他访客一起关在门外。"""
+        from search import api_views
+        for _ in range(api_views._LOGIN_MAX_FAILS):
+            self._login('bad', ip='203.0.113.7')
+        self.assertEqual(self._login('bad', ip='203.0.113.7').status_code, 429)
+        self.assertEqual(self._login('bad', ip='198.51.100.4').status_code, 401)
+
+
+class ResumeJobValidationTests(SimpleTestCase):
+    """resume_job 只能是 jobs/ 下的直接子目录名，防路径穿越。"""
+
+    def _start(self, resume_job):
+        from search.crawl_manager import CrawlManager
+        return CrawlManager().start(spider='news_rss', resume_job=resume_job)
+
+    def test_traversal_and_absolute_paths_rejected(self):
+        for bad in ('../etc', '../../etc/passwd', '/etc', 'a/b', '..',
+                    './news_rss_1', 'news_rss_1/../..'):
+            with self.subTest(resume_job=bad):
+                result = self._start(bad)
+                self.assertFalse(result['started'])
+                self.assertEqual(result['reason'], '非法的任务名称')
+
+    def test_wellformed_but_missing_job_reports_not_found(self):
+        result = self._start('news_rss_19700101000000')
+        self.assertFalse(result['started'])
+        self.assertIn('找不到要恢复的任务', result['reason'])
+
+
+class CrawlerComplianceTests(SimpleTestCase):
+    """采集侧合规边界：遵守 robots、自报身份、伪装仅限必要域名。"""
+
+    def test_robots_obeyed_and_identity_declared(self):
+        from crawler import settings as crawler_settings
+        self.assertTrue(crawler_settings.ROBOTSTXT_OBEY)
+        self.assertIn('XSearchBot', crawler_settings.USER_AGENT)
+
+    def test_spoofing_scoped_to_douyin_only(self):
+        from crawler import settings as crawler_settings
+        self.assertIn('www.douyin.com', crawler_settings.FINGERPRINT_HOSTS)
+        for public_host in ('aihot.news', 'www.chinanews.com', 'www.ithome.com'):
+            self.assertFalse(any(public_host.endswith(h) or public_host == h
+                                 for h in crawler_settings.FINGERPRINT_HOSTS),
+                             '{} 不该被伪装'.format(public_host))
+
+    def _middleware(self, hosts):
+        from crawler.middlewares import BrowserFingerprintHeadersMiddleware
+        return BrowserFingerprintHeadersMiddleware(hosts)
+
+    def test_honest_ua_for_non_allowlisted_host(self):
+        import scrapy
+        mw = self._middleware(['www.douyin.com', 'douyin.com'])
+        req = scrapy.Request('https://aihot.news/api/v1/items')
+        mw.process_request(req)
+        # 不在白名单：中间件不写 UA，交给内置 UserAgentMiddleware 发 XSearchBot
+        self.assertIsNone(req.headers.get('User-Agent'))
+
+    def test_browser_headers_for_allowlisted_host(self):
+        import scrapy
+        mw = self._middleware(['www.douyin.com', 'douyin.com'])
+        req = scrapy.Request('https://www.douyin.com/hot')
+        mw.process_request(req)
+        self.assertTrue((req.headers.get('User-Agent') or b'').startswith(b'Mozilla'))
+
+    def test_suffix_lookalike_host_not_spoofed(self):
+        """evil-douyin.com 不能因为后缀相同就拿到伪装头。"""
+        import scrapy
+        mw = self._middleware(['douyin.com'])
+        req = scrapy.Request('https://evil-douyin.com/hot')
+        mw.process_request(req)
+        self.assertIsNone(req.headers.get('User-Agent'))
+
+    def test_empty_allowlist_disables_spoofing(self):
+        import scrapy
+        req = scrapy.Request('https://www.douyin.com/hot')
+        self._middleware([]).process_request(req)
+        self.assertIsNone(req.headers.get('User-Agent'))
+
+    def test_captcha_and_llm_modules_removed(self):
+        """验证码识别/LLM 抽取模块不得回流到仓库（既无调用方又涉绕过技术措施）。"""
+        import importlib.util
+        for module in ('common', 'common.llm_client', 'crawler.ai.vlm_captcha',
+                       'crawler.ai.llm_extract', 'crawler.tools.zhihu_login_vlm'):
+            with self.subTest(module=module):
+                try:
+                    self.assertIsNone(importlib.util.find_spec(module))
+                except ModuleNotFoundError:
+                    pass  # 父包都不存在，同样视为已移除
+
+    def test_dead_people_feed_removed_everywhere(self):
+        """人民网 RSS 自 2025-06 停更：爬虫源与后端新闻来源必须一致且不含它。"""
+        from crawler.spiders.news_rss import FEEDS
+        from search.api_views import NEWS_SOURCES
+        self.assertEqual(set(FEEDS), {'news_chinanews', 'news_ithome', 'news_solidot'})
+        self.assertEqual(set(NEWS_SOURCES), set(FEEDS))

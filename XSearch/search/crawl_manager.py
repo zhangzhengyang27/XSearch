@@ -29,6 +29,9 @@ HISTORY_FILE = os.path.join(BASE_DIR, "..", "crawl_history.json")
 JOBS_DIR = os.path.join(BASE_DIR, "..", "jobs")  # Scrapy JOBDIR：持久化爬虫状态，支持中断恢复
 LOG_TAIL_LINES = 30
 MAX_HISTORY = 200  # 最多保留 200 条历史记录
+# JOBDIR 目录名（由 "{}_{}".format(spider, ts) 生成）的合法字符集，
+# 用于校验前端传回的 resume_job，见 CrawlManager.start()
+JOB_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 
 # 可从前端触发的爬虫白名单：key -> scrapy 爬虫名与附加参数
 # needs 标记该爬虫必填的参数（从前端透传）
@@ -36,7 +39,7 @@ SPIDERS = {
     "douyin_hot":         {"scrapy_name": "douyin_hot", "label": "抖音热点榜"},
     "aihot_hot":          {"scrapy_name": "aihot_hot", "label": "AI热点榜(AIHOT)"},
     "aihot_news":         {"scrapy_name": "aihot_news", "label": "AI资讯+日报(AIHOT)"},
-    "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(4源)"},
+    "news_rss":           {"scrapy_name": "news_rss", "label": "新闻RSS(3源)"},
     "news_backfill":      {"scrapy_name": "news_backfill", "label": "新闻回填(中新网180天)"},
 }
 
@@ -159,9 +162,16 @@ class CrawlManager(object):
 
             # JOBDIR：持久化爬虫状态（已爬取 URL、请求队列），支持中断恢复
             if resume_job:
-                job_dir = os.path.join(JOBS_DIR, resume_job)
-                if not os.path.exists(job_dir):
-                    return {"started": False, "reason": "找不到要恢复的任务: {}".format(resume_job)}
+                # 只接受 jobs/ 的直接子目录名：拒绝绝对路径与 "../" 穿越，
+                # 否则等于让调用方把 JOBDIR（爬虫可写状态的地方）指到任意目录
+                name = resume_job.strip().rstrip("/")
+                if (name != os.path.basename(name) or name in (".", "..")
+                        or not JOB_NAME_RE.fullmatch(name)):
+                    logger.warning("拒绝非法 resume_job 参数: %r", resume_job)
+                    return {"started": False, "reason": "非法的任务名称"}
+                job_dir = os.path.join(JOBS_DIR, name)
+                if not os.path.isdir(job_dir):
+                    return {"started": False, "reason": "找不到要恢复的任务: {}".format(name)}
             else:
                 job_dir = os.path.join(JOBS_DIR, "{}_{}".format(spider, int(time.time())))
             self._current_job_dir = job_dir
