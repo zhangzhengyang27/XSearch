@@ -15,7 +15,7 @@
         POST /api/auth/logout       退出登录（吊销 token）
         「采集管理」的查询/配置类接口（历史/统计/爬虫列表/定时任务）
         与「数据管理」接口（ES 文档浏览/编辑/删除/清理）
-    免鉴权：POST /api/auth/login（按 IP 限速，见 _login_guard）
+    免鉴权：POST /api/auth/login（按 IP 限速，见 _login_locked_for / _login_record_failure）
 
 所有接口在 ES/Redis 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
