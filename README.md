@@ -233,6 +233,39 @@ docker compose exec backend scrapy crawl news_rss
 生产拓扑（NAS）见 `docker-compose.prod.yml` 顶部注释：ES/Redis/后端不发布宿主端口，
 公网唯一入口是前端 `127.0.0.1:5600` → frp → VPS Nginx → HTTPS。
 
+## 备份与恢复
+
+`deploy/backup.sh` 每天把三样东西送到**另一块盘**（同盘备份等于没备份，脚本会直接拒绝）：
+
+1. 运行时状态：`schedules.json`（cron 配置，丢了就再也不会自动采集）、`crawl_history.json`、`db.sqlite3`，以及 `.env`
+2. ES 快照：走 `_snapshot` API（ES 容器需配 `path.repo=/snapshots` + `./data/snapshots` 挂载，prod compose 已带）
+3. 过期清理：默认保留 14 天（`KEEP_DAYS=`），结束前自检"备份目录非空"，空则退出码非 0
+
+```bash
+# NAS 上手动跑一次（先 dry-run 看动作，再正式跑）
+DRY_RUN=1 bash deploy/backup.sh /volume2/backup/xsearch
+bash deploy/backup.sh /volume2/backup/xsearch
+```
+
+Synology：控制面板 → 任务计划 → 新增 → 用户自定义脚本，`每日` 执行
+`SRC_DIR=/volume1/docker/xsearch bash /volume1/docker/xsearch/deploy/backup.sh /volume2/backup/xsearch >> /volume1/docker/xsearch/logs/backup.log 2>&1`。
+
+恢复（顺序不能反，先起 ES 再灌状态文件）：
+
+```bash
+# 1) ES 快照：把备份目录放回 /snapshots/xsearch，然后
+docker exec xsearch-es curl -XPUT localhost:9200/_snapshot/xsearch \
+  -H 'Content-Type: application/json' -d '{"type":"fs","settings":{"location":"xsearch"}}'
+docker exec xsearch-es curl -XPOST "localhost:9200/_snapshot/xsearch/<bk_时间戳>/_restore?wait_for_completion=true" \
+  -H 'Content-Type: application/json' -d '{"indices":"quotes","include_aliases":false}'
+# 2) 状态文件：停后端 → 覆盖 ./data/{schedules.json,crawl_history.json,db.sqlite3} 与 .env → 起后端
+docker compose -f docker-compose.prod.yml up -d backend
+# 3) 验证：/api/health 返回 200，采集管理页能看到恢复后的定时任务
+curl -s localhost:5600/api/health/ | head -c 200
+```
+
+> 只备份不练恢复 = 没有备份。至少在一次空闲时把整套恢复流程走一遍。
+
 ## 测试
 
 ```bash
