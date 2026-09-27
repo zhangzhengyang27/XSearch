@@ -64,6 +64,20 @@ router.afterEach((to) => {
   setMeta(meta.title || '', meta.desc || '', !!meta.noIndex)
 })
 
+// 发版后旧标签页自救：视图改成懒加载之后，用户手里那个页面的 index.html 还指向
+// 上一版的 chunk 文件名，点导航会因动态 import 404 而白屏。整页重载一次拿新产物。
+// 用 sessionStorage 兜住重载风暴：同一浏览器会话里 10 秒内只自救一次。
+router.onError((err) => {
+  const msg = String((err as Error)?.message || err)
+  if (!/dynamically imported module|Loading chunk|Failed to fetch dynamically|error loading dynamically/i.test(msg)) {
+    return
+  }
+  const last = Number(sessionStorage.getItem('chunk-reload') || 0)
+  if (Date.now() - last < 10_000) return
+  sessionStorage.setItem('chunk-reload', String(Date.now()))
+  window.location.reload()
+})
+
 // 管理页仅管理员可用：未登录跳登录页（登录后回到原地址）；已登录访问 /login 直接进采集管理
 router.beforeEach((to) => {
   if (ADMIN_PATHS.includes(to.path) && !isAdmin.value) {

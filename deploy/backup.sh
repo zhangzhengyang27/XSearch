@@ -8,10 +8,15 @@
 #   3) .env：含 DJANGO_SECRET_KEY / 管理员口令，丢了等于重新部署要重敲；
 #      因此本脚本把目标目录权限收到 700，且备份盘同样不能对公网开放
 #
-# 用法：
-#   bash backup.sh                      # 正式备份到 /volume2/backup/xsearch
-#   DRY_RUN=1 bash backup.sh            # 只打印要执行的动作，不落任何东西
-#   bash backup.sh /volume3/bk/xsearch  # 自定义目标目录
+# 用法（目标目录必须显式给，脚本不再猜默认值）：
+#   DRY_RUN=1 bash backup.sh /volume1/usbbackup/xsearch     # 先演练
+#   bash backup.sh /volume1/usbbackup/xsearch               # USB/eSATA 盘
+#   bash backup.sh /volume1/homes/zhangzhengyang/backup/xsearch
+#
+# ⚠️ 这台 NAS 只有一块 6TB 盘（RAID1 单盘 = 无冗余，已用约 76%），
+#    所以"备份到另一块盘"在本机不成立：目标必须落在
+#      ① 外接 USB/eSATA 盘，或 ② 群晖 C2/Hyper Backup 的云端目标，或 ③ 推给 Mac。
+#    留在 /volume1 里只算"防误删"，不算"防丢盘"。
 #
 # 前置（一次性）：docker-compose.prod.yml 的 elasticsearch 服务需已挂
 #   ./data/snapshots:/snapshots 并带 path.repo=/snapshots（本仓库已配好）。
@@ -21,8 +26,13 @@
 
 set -euo pipefail
 
-DEST_ROOT="${1:-/volume2/backup/xsearch}"
 SRC_DIR="${SRC_DIR:-/volume1/docker/xsearch}"
+DEST_ROOT="${1:-}"
+if [ -z "$DEST_ROOT" ]; then
+  echo "用法: bash backup.sh <备份目标目录>"
+  echo "目标必须显式指定，且不能落在源目录（$SRC_DIR）内 —— 单盘机上那不构成备份。"
+  exit 2
+fi
 KEEP_DAYS="${KEEP_DAYS:-14}"
 CONTAINER="${ES_CONTAINER:-xsearch-es}"
 TS="$(date +%Y%m%d-%H%M%S)"
