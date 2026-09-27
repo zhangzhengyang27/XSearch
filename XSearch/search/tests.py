@@ -1135,7 +1135,6 @@ class DateDisplayTests(SimpleTestCase):
 
 class TzAwareWriteTests(SimpleTestCase):
     """写入侧不许再用 naive 本地时间：ES 会当 UTC 解释，整体偏 8 小时。"""
-
     def test_utc_now_is_aware(self):
         from crawler.pipelines import utc_now
         value = utc_now()
@@ -1157,3 +1156,83 @@ class TzAwareWriteTests(SimpleTestCase):
                     if pattern.search(line):
                         offenders.append('{}:{} {}'.format(path, no, line.strip()))
         self.assertEqual(offenders, [])
+
+
+class DocDetailTests(SimpleTestCase):
+    """详情页按 ES _id 精确取文。
+
+    旧实现是"拿标题再搜一遍取第一条"：标题相近或撞车时会把读者带到另一篇，
+    资讯站的一次错链就是一次信任崩塌，而且代码里根本无法察觉。
+    """
+
+    DOC_ID = 'd41d8cd98f00b204e9800998ecf8427e'
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _hit(self, source='aihot_news', content=None):
+        return {"_id": self.DOC_ID, "_source": {
+            "title": "某模型发布", "content": content or "长" * 400,
+            "url": "https://example.com/1", "author": "AIHOT", "source": source,
+            "rating": 88, "create_date": "2026-09-26T23:00:00Z",
+        }}
+
+    def _resp(self, hits):
+        return {"hits": {"total": {"value": len(hits)}, "hits": hits},
+                "aggregations": {}}
+
+    def _doc(self, doc_id=None):
+        from search.api_views import api_doc
+        return api_doc(self.factory.get('/api/doc/x/'), doc_id or self.DOC_ID)
+
+    def test_returns_full_document_not_truncated(self):
+        with patch('search.api_views.client') as c:
+            c.get.return_value = self._hit()
+            resp = self._doc()
+        body = json.loads(resp.content)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(body['id'], self.DOC_ID)
+        self.assertEqual(body['title'], '某模型发布')
+        self.assertEqual(len(body['content']), 400)   # 列表才截 150，详情给全文
+        self.assertEqual(body['create_date'], '2026-09-27')  # UTC→北京日历日
+
+    def test_missing_document_returns_404(self):
+        from elasticsearch import NotFoundError
+        with patch('search.api_views.client') as c:
+            c.get.side_effect = NotFoundError(404, 'not_found', {})
+            resp = self._doc()
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(json.loads(resp.content)['code'], 'not_found')
+
+    def test_es_down_returns_503_not_500(self):
+        with patch('search.api_views.client') as c:
+            c.get.side_effect = ConnectionError('refused')
+            self.assertEqual(self._doc().status_code, 503)
+
+    def test_title_guessing_endpoint_is_gone(self):
+        """按标题猜文的接口不得回流，否则详情页随时可能重新带错文章。"""
+        from search import api_views
+        self.assertFalse(hasattr(api_views, 'api_ai_item'))
+
+    def test_rankings_carry_doc_id(self):
+        """两类列表分支都要回传 _id，否则前端跳不了详情页。"""
+        hits = [self._hit('aihot_hot')]
+        with patch('search.api_views.client') as c:
+            c.search.return_value = self._resp(hits)
+            body = json.loads(api_rankings(
+                self.factory.get('/api/rankings/', {'source': 'aihot_hot'})).content)
+        self.assertEqual(body['items'][0]['id'], self.DOC_ID)
+
+        with patch('search.api_views.client') as c, patch('search.api_views.redis_cli') as r:
+            c.search.return_value = self._resp([self._hit('aihot_daily')])
+            r.get.return_value = None
+            body = json.loads(api_rankings(
+                self.factory.get('/api/rankings/', {'source': 'aihot_daily'})).content)
+        self.assertEqual(body['items'][0]['id'], self.DOC_ID)
+
+    def test_search_results_carry_doc_id(self):
+        with patch('search.api_views.client') as c, patch('search.api_views.redis_cli'):
+            c.search.return_value = self._resp([self._hit()])
+            body = json.loads(api_search(
+                self.factory.get('/api/search/', {'q': '某模型'})).content)
+        self.assertEqual(body['results'][0]['id'], self.DOC_ID)

@@ -166,7 +166,7 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 | `/api/stats/` | GET | 公开 | 数据概览统计（依赖故障会降级成 `es_ok:false`，**不适合当探针**） |
 | `/api/health/` | GET | 公开 | 存活探针：真问 ES/Redis，任一不可用返回 **503**（镜像 HEALTHCHECK 打的就是它） |
 | `/api/rankings/` | GET | 公开 | 榜单 / 新闻列表（AI 热点榜、抖音榜 + 新闻各源 + AI 日报） |
-| `/api/ai/item/` | GET | 公开 | AI 条目详情（按标题检索本地 ES） |
+| `/api/doc/<id>/` | GET | 公开 | 单篇详情：按 ES 文档 `_id` 精确取全文（列表类接口都回传 `id`） |
 | `/api/img/` | GET | 公开 | 图片代理（本地磁盘缓存，域名白名单） |
 | `/api/auth/login/` | POST | 公开 | 管理员登录；**按 IP 限速**，5 次失败锁 15 分钟 |
 | `/api/auth/logout/` | POST | 管理员 | 退出登录（吊销 token） |

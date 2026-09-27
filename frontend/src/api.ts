@@ -7,6 +7,8 @@ import { adminToken, clearAuth, isAdminPath } from './auth'
 
 /** ES 文档条目：搜索 / 榜单 / 管理接口共用的字段子集，不同来源的字段可能缺省 */
 export interface DocItem {
+  /** ES 文档 _id：详情页据此精确取文（列表类接口都会带上） */
+  id: string
   url: string
   title: string
   content: string
@@ -53,12 +55,6 @@ export interface RankingsResult {
   total: number
   page?: number
   page_nums?: number
-  items: DocItem[]
-}
-
-export interface AiItemResult {
-  q: string
-  total: number
   items: DocItem[]
 }
 
@@ -200,6 +196,26 @@ function errorMessage(data: unknown, status: number): string {
   return `请求失败 (${status})`
 }
 
+/** 带 HTTP 状态码与业务 code 的错误：调用方要区分"资源不存在"和"服务不可用" */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(message: string, status: number, code = '') {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+function errorCode(data: unknown): string {
+  if (data && typeof data === 'object' && 'code' in data) {
+    return String((data as { code: unknown }).code ?? '')
+  }
+  return ''
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = { ...authHeaders(), ...(options.headers || {}) }
   const resp = await fetch(BASE + path, { ...options, headers })
@@ -215,7 +231,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
           encodeURIComponent(location.pathname + location.search)
       }
     }
-    throw new Error(errorMessage(data, resp.status))
+    throw new ApiError(errorMessage(data, resp.status), resp.status, errorCode(data))
   }
   return data as T
 }
@@ -232,7 +248,7 @@ export const api = {
     return request<string[]>(`/api/suggest/?s=${encodeURIComponent(s)}`)
   },
   stats: () => request<StatsResult>('/api/stats/'),
-  aiItem: (q: string) => request<AiItemResult>(`/api/ai/item/?q=${encodeURIComponent(q)}`),
+  doc: (id: string) => request<DocItem>(`/api/doc/${encodeURIComponent(id)}/`),
   crawlStart: (spider: string, pages: number, js: boolean) => request<CrawlStartResult>('/api/crawl/start/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

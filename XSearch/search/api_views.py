@@ -321,6 +321,8 @@ def api_search(request):
             src = hit["_source"]
             hl = hit.get("highlight") or {}
             results.append({
+                # ES 文档 _id：详情页按稳定 id 取文，不再用"标题再搜一遍取第一条"
+                "id": hit.get("_id", ""),
                 "title": "".join(hl["title"]) if hl.get("title") else src.get("title", ""),
                 "content": "".join(hl["content"]) if hl.get("content") else (src.get("content") or "")[:200],
                 "url": src.get("url", ""),
@@ -504,44 +506,34 @@ AI_SOURCES = ("aihot_news", "aihot_daily", "aihot_hot")
 
 
 @require_http_methods(["GET"])
-def api_ai_item(request):
-    """AI 条目详情：按标题在本地 ES 中检索完整文档（AI 精选/日报/热点榜）。
+@require_http_methods(["GET"])
+def api_doc(request, doc_id):
+    """按 ES 文档 _id 取单篇详情（列表类接口都会带上 id）。
 
-    供 /ai/detail 详情页使用——标题相关度排序，返回完整正文（不截断）。
+    取代旧的 /api/ai/item：那条路径拿标题去 multi_match 再取第一条，
+    标题相近或撞车时会把读者带到另一篇文章上——资讯站的一次错链就是一次
+    信任崩塌，而且代码里根本无法察觉。
     """
-    q = request.GET.get("q", "").strip()
-    if not q:
-        return JsonResponse({"error": "缺少参数 q"}, status=400)
     try:
-        resp = client.search(
-            index=INDEX,
-            query={"bool": {
-                "must": {"multi_match": {"query": q, "fields": ["title^3", "content"]}},
-                "filter": [{"terms": {"source": list(AI_SOURCES)}}],
-            }},
-            size=5,
-        )
+        hit = client.get(index=INDEX, id=doc_id)
+    except NotFoundError:
+        return JsonResponse({"error": "文章不存在或已被清理", "code": "not_found"}, status=404)
     except Exception as e:
         return _es_error(e)
-    items = [{
-        "title": h["_source"].get("title", ""),
-        "content": h["_source"].get("content", ""),
-        "author": h["_source"].get("author", ""),
-        "source": h["_source"].get("source", ""),
-        "rating": h["_source"].get("rating"),
-        "url": h["_source"].get("url", ""),
-        "create_date": _display_date(h["_source"].get("create_date")),
-    } for h in resp["hits"]["hits"]]
-    return JsonResponse({"q": q, "total": len(items), "items": items})
+    # 详情页始终给全文（列表页才做 150 字截断），并保留原文链接由前端引导回源站
+    data = _list_item(hit, keep_content=True)
+    data["id"] = hit.get("_id") or doc_id
+    return JsonResponse(data)
 
-
-def _list_item(src, keep_content=False):
+def _list_item(hit, keep_content=False):
     """榜单/新闻列表条目的统一字段映射。
 
     keep_content=True 时保留全文（AI 日报/热点榜页需要展示综述与日报正文），
     否则截断为 150 字摘要。
     """
+    src = hit["_source"]
     return {
+        "id": hit.get("_id", ""),
         "rank": src.get("rank"),
         "title": src.get("title", ""),
         "content": (src.get("content") or "")[:5000 if keep_content else 150],
@@ -605,7 +597,7 @@ def api_rankings(request):
         payload = {
             "source": source, "total": total, "page": page,
             "page_nums": math.ceil(total / page_size) if total else 0,
-            "items": [_list_item(h["_source"], keep_content=keep) for h in resp["hits"]["hits"]],
+            "items": [_list_item(h, keep_content=keep) for h in resp["hits"]["hits"]],
         }
         try:
             redis_cli.setex(cache_key, 60, json.dumps(payload, ensure_ascii=False))
@@ -624,7 +616,7 @@ def api_rankings(request):
         return _es_error(e)
 
     # AI 热点榜需要完整 AI 综述
-    items = [_list_item(h["_source"], keep_content=source in AI_SOURCES)
+    items = [_list_item(h, keep_content=source in AI_SOURCES)
              for h in resp["hits"]["hits"]]
     return JsonResponse({"source": source, "total": len(items), "items": items})
 

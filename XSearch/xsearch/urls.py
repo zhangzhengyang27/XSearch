@@ -8,10 +8,11 @@ from django.urls import path
 from django.views.generic import View
 
 from search.api_views import (api_admin_login, api_admin_logout,
-                              api_ai_item, api_crawl_start, api_crawl_status,
+                              api_crawl_start, api_crawl_status,
                               api_crawl_spiders, api_crawl_history, api_crawl_stats,
                               api_crawl_resumable,
                               api_db_doc, api_db_docs, api_db_overview, api_db_purge,
+                              api_doc,
                               api_health, api_img, api_rankings,
                               api_schedule_add, api_schedule_list, api_schedule_remove,
                               api_schedule_toggle, api_schedule_update,
@@ -57,5 +58,5 @@ urlpatterns = [
     path('api/admin/db/doc/<str:doc_id>/', api_db_doc, name="api-db-doc"),
     path('api/admin/db/purge/', api_db_purge, name="api-db-purge"),
     path('api/img/', api_img, name="api-img"),
-    path('api/ai/item/', api_ai_item, name="api-ai-item"),
+    path('api/doc/<str:doc_id>/', api_doc, name="api-doc"),
 ]

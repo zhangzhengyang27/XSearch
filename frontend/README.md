@@ -8,7 +8,7 @@
 | `/search` | 关键词搜索：补全建议、结果高亮、来源分面、排序、分页 | `/api/search/` `/api/suggest/` |
 | `/news` | 新闻列表：中新网 / IT之家 / Solidot 分源分页 | `/api/rankings/` |
 | `/ai` | AI 讯息：精选 / 日报 / 热点榜三 Tab | `/api/rankings/` |
-| `/ai/detail` | AI 条目详情（按标题检索本地索引） | `/api/ai/item/` |
+| `/ai/detail` | AI 条目详情（按 `?id=` 精确取文，不再按标题猜） | `/api/doc/<id>/` |
 | `/rankings` | 榜单：抖音热点榜 | `/api/rankings/` |
 | `/stats` | 数据概览：总量、来源分布、热搜词 | `/api/stats/` |
 | `/crawl` | 采集管理（需登录）：触发爬虫、状态与日志、定时任务 | `/api/crawl/*` |
