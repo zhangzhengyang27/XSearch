@@ -263,6 +263,10 @@ pyflakes，见 `ruff.toml`）→ Django 测试 → 前端 `npm ci` + 构建 → 
 - [ ] `cd frontend && npm run build` 产物 `dist/` 与后端同批发布（前端为纯静态，无注入密钥）
 - [ ] 部署后到「采集管理」页确认各定时任务"下次运行"时间正确（调度器随服务自启，无需访问页面激活）；
       启动日志会逐条打印每个任务的「下次触发 / 上次触发」，"从没跑过"在那里就能看出来
+- [ ] 时区修复只作用于**新入库**文档：修复前的 `create_date` / `crawled_at` 带 +8 小时偏斜
+      （naive 本地时间被 ES 当 UTC），会随 7/30 天窗口滚动自然退场；要立刻校正，
+      对 `crawled_at < 部署时刻` 的文档跑一次 update_by_query 减 8 小时
+      （「数据管理」页先抽查几条再动手）
 - [ ] 配好告警邮箱并发一封自检：
       `python manage.py shell -c "from search.notify import notify; print(notify('selftest','告警通道自检'))"`
       （收到信才说明停更会在 15 分钟内被你发现，而不是靠打开网站撞见）

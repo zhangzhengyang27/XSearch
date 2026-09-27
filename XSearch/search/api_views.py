@@ -24,6 +24,7 @@
 
 所有接口在 ES/Redis 不可用时返回结构化错误（非 500），前端据此降级展示。
 """
+import datetime
 import functools
 import hmac
 import json
@@ -33,6 +34,7 @@ import os
 import secrets
 import threading
 import time
+from zoneinfo import ZoneInfo
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -61,6 +63,28 @@ logger = logging.getLogger(__name__)
 
 def _es_error(e):
     return JsonResponse({"error": "Elasticsearch 不可用: {}".format(e)}, status=503)
+
+
+# ES 里日期一律按 UTC 存取；读者看到的"发布日期"要换回站点时区的日历日，
+# 否则北京时间早上 8 点前发布的内容会被归到前一天
+_DISPLAY_TZ = ZoneInfo(settings.TIME_ZONE)
+
+
+def _display_date(value):
+    """把 ES 的日期（ISO 串 / datetime）换算成站点时区的 YYYY-MM-DD。
+
+    解析不了退回原串前 10 位——读接口不能因为一条脏数据整页 500。
+    """
+    if not value:
+        return ""
+    text = value.isoformat() if isinstance(value, datetime.datetime) else str(value)
+    try:
+        dt = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)  # ES 回读的 naive 串即 UTC
+    return dt.astimezone(_DISPLAY_TZ).strftime("%Y-%m-%d")
 
 
 # ---- 管理员登录（「采集管理」页鉴权）----
@@ -305,7 +329,7 @@ def api_search(request):
                 "rating": src.get("rating"),
                 "rank": src.get("rank"),
                 "front_image_url": src.get("front_image_url", ""),
-                "create_date": (src.get("create_date") or "")[:10],
+                "create_date": _display_date(src.get("create_date")),
                 "praise_nums": src.get("praise_nums"),
                 "view_nums": src.get("view_nums"),
                 "reply_nums": src.get("reply_nums"),
@@ -506,7 +530,7 @@ def api_ai_item(request):
         "source": h["_source"].get("source", ""),
         "rating": h["_source"].get("rating"),
         "url": h["_source"].get("url", ""),
-        "create_date": (h["_source"].get("create_date") or "")[:10],
+        "create_date": _display_date(h["_source"].get("create_date")),
     } for h in resp["hits"]["hits"]]
     return JsonResponse({"q": q, "total": len(items), "items": items})
 
@@ -530,7 +554,7 @@ def _list_item(src, keep_content=False):
         "praise_nums": src.get("praise_nums"),
         "danmaku_nums": src.get("danmaku_nums"),
         "reply_nums": src.get("reply_nums"),
-        "create_date": (src.get("create_date") or "")[:10],
+        "create_date": _display_date(src.get("create_date")),
     }
 
 

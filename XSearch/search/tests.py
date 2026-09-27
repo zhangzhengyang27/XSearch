@@ -1098,3 +1098,62 @@ class HealthEndpointTests(SimpleTestCase):
         resp = self._get()
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(self._body(resp)['index']['docs'])
+
+
+class DateDisplayTests(SimpleTestCase):
+    """ES 存 UTC，读者看到的日历日要按站点时区（Asia/Shanghai）换算。"""
+
+    def _d(self, value):
+        from search.api_views import _display_date
+        return _display_date(value)
+
+    def test_utc_before_1600_belongs_to_previous_beijing_day(self):
+        """UTC 23:00 = 北京次日 07:00：修复前直接截串会显示成前一天。"""
+        self.assertEqual(self._d('2026-09-26T23:00:00Z'), '2026-09-27')
+        self.assertEqual(self._d('2026-09-26T15:59:59Z'), '2026-09-26')
+        self.assertEqual(self._d('2026-09-26T16:00:00Z'), '2026-09-27')
+
+    def test_naive_string_is_read_as_utc(self):
+        """ES 回读的 naive 串就是 UTC，不能再当本地时间。"""
+        self.assertEqual(self._d('2026-09-26T23:00:00'), '2026-09-27')
+
+    def test_offset_aware_input_respected(self):
+        self.assertEqual(self._d('2026-09-27T07:00:00+08:00'), '2026-09-27')
+        self.assertEqual(self._d('2026-09-26T23:00:00-05:00'), '2026-09-27')
+
+    def test_datetime_object_accepted(self):
+        import datetime as dt
+        self.assertEqual(self._d(dt.datetime(2026, 9, 26, 23, 0, tzinfo=dt.timezone.utc)),
+                         '2026-09-27')
+
+    def test_date_only_and_empty_and_junk(self):
+        self.assertEqual(self._d('2026-09-26'), '2026-09-26')   # 零点 UTC = 北京 08:00 同日
+        self.assertEqual(self._d(None), '')
+        self.assertEqual(self._d(''), '')
+        self.assertEqual(self._d('not-a-date-at-all'), 'not-a-date')  # 脏数据退回截断，不抛异常
+
+
+class TzAwareWriteTests(SimpleTestCase):
+    """写入侧不许再用 naive 本地时间：ES 会当 UTC 解释，整体偏 8 小时。"""
+
+    def test_utc_now_is_aware(self):
+        from crawler.pipelines import utc_now
+        value = utc_now()
+        self.assertIsNotNone(value.tzinfo)
+        self.assertEqual(value.utcoffset().total_seconds(), 0)
+
+    def test_no_naive_now_in_stored_date_fields(self):
+        """扫源码：create_date / crawled_at 的赋值里不许出现裸 datetime.now()。
+
+        news_backfill 里 datetime.now() 只用来推日期范围（不入库），不在扫描范围。
+        """
+        import glob
+        import re
+        pattern = re.compile(r'(create_date|crawled_at)["\']?\s*[:=].*datetime\.now\(\)')
+        offenders = []
+        for path in glob.glob('crawler/**/*.py', recursive=True):
+            with open(path, encoding='utf-8') as f:
+                for no, line in enumerate(f, 1):
+                    if pattern.search(line):
+                        offenders.append('{}:{} {}'.format(path, no, line.strip()))
+        self.assertEqual(offenders, [])

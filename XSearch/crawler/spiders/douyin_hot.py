@@ -11,7 +11,7 @@
     scrapy crawl douyin_hot
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import scrapy
 
@@ -100,7 +100,8 @@ class DouyinHotSpider(scrapy.Spider):
                     "view_nums": hot_value,  # 热度值作为播放量展示
                     "rank": rank,
                     "source": "douyin_hot",
-                    "create_date": datetime.now(),
+                    # 带时区的 UTC：naive 本地时间会被 ES 当 UTC 解释，整体偏 8 小时
+                    "create_date": datetime.now(timezone.utc),
                 }
         finally:
             await page.close()
