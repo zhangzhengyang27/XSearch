@@ -24,7 +24,11 @@
 ### 🕷️ 采集管理（需管理员登录）
 - 5 个内置爬虫（见「爬虫列表」）
 - Web 界面一键启动 / 状态监控 / 历史记录 / 日志尾部
-- 定时任务（APScheduler，cron 表达式）
+- 终态由盯梢线程即时回写（不依赖前端轮询）；进程异常退出/0 条数据分别记为
+  `failed` / `empty`，重启遗留的 `running` 会在启动时改判 `interrupted`
+- 定时任务（APScheduler，cron 表达式）：错过触发窗口在 1 小时宽限内补跑，
+  misfire 与回调异常会写入历史并告警；每个任务记录「上次触发」
+- 失败/停更邮件告警（同类事件 30 分钟冷却，见「环境变量」ALERT_*）
 - 中断恢复（Scrapy JOBDIR，任务名经路径校验）
 - 采集统计图表
 
@@ -203,6 +207,10 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis 连接 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | （空） | 管理员账号，建议写在 `XSearch/local_settings.py`（不入 git） |
 | `API_TOKEN` | （空） | 非浏览器客户端的额外令牌；留空不启用。浏览器侧写接口不依赖它 |
+| `ALERT_EMAIL_ENABLED` | `False` | 开启采集失败 / 0 条 / 定时任务 misfire 的邮件告警 |
+| `ALERT_SMTP_HOST` / `_PORT` | `smtp.qq.com` / `465` | SMTP 服务器（SSL） |
+| `ALERT_SMTP_USER` / `_PASSWORD` | （空） | 发信账号与 **SMTP 授权码**（QQ/163 非登录密码） |
+| `ALERT_EMAIL_TO` | （空 = 发给 USER） | 收件人，逗号分隔 |
 | `AI_PROXIES` | （空） | 住宅代理列表（逗号分隔），按请求轮换 |
 | `FRONTEND_ORIGINS` | （空） | 追加允许跨域的前端来源 |
 
@@ -231,7 +239,9 @@ python manage.py test search
 
 覆盖：API 参数校验、CORS、管理员登录/登出/401、**登录限速与解锁**、**采集接口鉴权**、
 **resume_job 路径穿越拦截**、ES 异常降级、数据管理读写、cron 校验、正文清洗、
-**robots 合规与指纹伪装域名边界**、已移除模块不得回流。
+**robots 合规与指纹伪装域名边界**、已移除模块不得回流、
+**采集终态无轮询回写 / 僵尸 running 收尾 / 原子写与写失败如实返回 / misfire 参数 /
+调度事件可见化 / 告警模块（假 SMTP）**。
 
 前端暂无自动化测试，构建时由 `vue-tsc --noEmit` 做类型检查（`npm run build`）。
 
@@ -244,7 +254,11 @@ python manage.py test search
 - [ ] 依赖用 `requirements-lock.txt` 安装（Dockerfile 默认），保证构建可复现
 - [ ] `python manage.py test search` 全绿后再发布
 - [ ] `cd frontend && npm run build` 产物 `dist/` 与后端同批发布（前端为纯静态，无注入密钥）
-- [ ] 部署后到「采集管理」页确认各定时任务"下次运行"时间正确（调度器随服务自启，无需访问页面激活）
+- [ ] 部署后到「采集管理」页确认各定时任务"下次运行"时间正确（调度器随服务自启，无需访问页面激活）；
+      启动日志会逐条打印每个任务的「下次触发 / 上次触发」，"从没跑过"在那里就能看出来
+- [ ] 配好告警邮箱并发一封自检：
+      `python manage.py shell -c "from search.notify import notify; print(notify('selftest','告警通道自检'))"`
+      （收到信才说明停更会在 15 分钟内被你发现，而不是靠打开网站撞见）
 - [ ] 采集合规：`ROBOTSTXT_OBEY=True`、默认发 `XSearchBot/1.0` UA；只有确需渲染的域名才进
       `crawler/settings.FINGERPRINT_HOSTS`，新增前先确认该站真的拒绝常规 UA
 

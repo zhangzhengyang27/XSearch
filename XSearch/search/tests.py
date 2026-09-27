@@ -939,3 +939,80 @@ class SchedulePersistenceAlertsTests(TempStateMixin, SimpleTestCase):
         self.assertTrue(self.cm._pid_alive(None))          # 无 pid：宁可判活
         self.assertTrue(self.cm._pid_alive(os.getpid()))   # 自己肯定活着
         self.assertFalse(self.cm._pid_alive('abc'))        # 非法值按已死
+
+
+class NotifyTests(SimpleTestCase):
+    """告警模块本身的行为（用假 SMTP，绝不真发信）。"""
+
+    CFG = dict(ALERT_EMAIL_ENABLED=True, ALERT_SMTP_HOST='smtp.example.test',
+               ALERT_SMTP_PORT=465, ALERT_SMTP_USER='bot@example.test',
+               ALERT_SMTP_PASSWORD='secret', ALERT_EMAIL_TO='me@example.test,you@example.test')
+
+    def setUp(self):
+        from search import notify
+        self.notify = notify
+        notify._recent.clear()
+        notify._warned_disabled = False
+
+    def tearDown(self):
+        self.notify._recent.clear()
+        self.notify._warned_disabled = False
+
+    @override_settings(ALERT_EMAIL_ENABLED=False)
+    def test_disabled_is_noop(self):
+        self.assertIsNone(self.notify._config())
+        with patch('smtplib.SMTP_SSL') as smtp:
+            self.assertFalse(self.notify.notify('k', '主题'))
+        smtp.assert_not_called()
+
+    @override_settings(**CFG)
+    def test_config_parses_recipients_and_defaults_host(self):
+        host, port, user, pwd, to = self.notify._config()
+        self.assertEqual((host, port, user), ('smtp.example.test', 465, 'bot@example.test'))
+        self.assertEqual(to, ['me@example.test', 'you@example.test'])
+        self.assertEqual(pwd, 'secret')
+
+    @override_settings(ALERT_EMAIL_ENABLED=True, ALERT_SMTP_USER='bot@example.test',
+                       ALERT_SMTP_PASSWORD='', ALERT_EMAIL_TO='')
+    def test_missing_password_degrades_once(self):
+        with patch('smtplib.SMTP_SSL') as smtp:
+            self.assertFalse(self.notify.notify('k', '主题'))
+            self.assertFalse(self.notify.notify('k2', '主题2'))
+        smtp.assert_not_called()
+
+    @override_settings(**CFG)
+    def test_send_uses_ssl_session_with_subject_prefix(self):
+        """发送在后台线程里完成：断言 SMTP 会话确实按预期建立。"""
+        done = threading.Event()
+        with patch('smtplib.SMTP_SSL') as SSL:
+            inst = SSL.return_value.__enter__.return_value
+
+            def send_message(msg):
+                self.assertTrue(msg['Subject'].startswith('[XSearch]'))
+                self.assertEqual(msg['To'], 'me@example.test, you@example.test')
+                done.set()
+            inst.send_message.side_effect = send_message
+            self.assertTrue(self.notify.notify('k', '采集 0 条：news_rss'))
+            self.assertTrue(done.wait(5), '后台线程未在 5s 内完成发送')
+            inst.login.assert_called_once_with('bot@example.test', 'secret')
+            SSL.assert_called_once_with('smtp.example.test', 465, timeout=self.notify._SEND_TIMEOUT)
+
+    @override_settings(**CFG)
+    def test_smtp_failure_does_not_raise(self):
+        """告警通道自己坏了不能把采集管理带崩。"""
+        with patch('smtplib.SMTP_SSL', side_effect=OSError('网络不通')):
+            self.notify.notify('k', '主题')  # 线程内异常，不该冒泡
+            time.sleep(0.2)
+
+    @override_settings(**CFG)
+    def test_cooldown_suppresses_duplicate_alert(self):
+        with patch('smtplib.SMTP_SSL'), patch.object(self.notify, '_send'):
+            self.assertTrue(self.notify.notify('same', '第一次'))
+            self.assertFalse(self.notify.notify('same', '第二次'), '冷却期内不应重复发信')
+            self.assertTrue(self.notify.notify('other', '不同键'))
+
+    @override_settings(**CFG)
+    def test_cooldown_expires(self):
+        self.notify._recent['k'] = time.time() - self.notify._COOLDOWN - 1
+        with patch.object(self.notify, '_send'):
+            self.assertTrue(self.notify.notify('k', '冷却已过'))

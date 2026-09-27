@@ -10,3 +10,12 @@ local_settings.py 已加入 .gitignore，管理员账号等敏感信息不会进
 # 「采集管理」页登录账号
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "change-me"
+
+# 采集失败 / 0 条 / 定时任务 misfire 的告警邮箱（见 search/notify.py）
+# QQ、163 等邮箱要用"SMTP 授权码"，不是登录密码
+ALERT_EMAIL_ENABLED = True
+ALERT_SMTP_HOST = "smtp.qq.com"
+ALERT_SMTP_PORT = 465
+ALERT_SMTP_USER = "you@example.com"
+ALERT_SMTP_PASSWORD = "smtp-auth-code"
+ALERT_EMAIL_TO = "you@example.com"   # 逗号可多收件人；留空则发给 USER
