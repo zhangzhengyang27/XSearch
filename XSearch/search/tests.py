@@ -1300,3 +1300,72 @@ class SeoTests(SimpleTestCase):
             text = self._sitemap().content.decode()
         self.assertEqual(text, canned)
         c.search.assert_not_called()
+
+
+class HeadlinesTests(SimpleTestCase):
+    """首页「今日要闻」：跨源混排 + 同题去重 + 排除榜单类。"""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _hit(self, title, source):
+        return {"_id": "{}-{}".format(source, title), "_source": {
+            "title": title, "content": "正文" * 30, "url": "https://example.com/" + title,
+            "author": "测试", "source": source, "rating": None,
+            "create_date": "2026-09-27T01:00:00Z"}}
+
+    def _call(self, hits, query=None):
+        from search.api_views import api_headlines
+        with patch('search.api_views.client') as c, patch('search.api_views.redis_cli') as r:
+            r.get.return_value = None
+            # 真 Redis 这里返回 list；不设的话 mock 会把 MagicMock 塞进 top_keywords，
+            # 测出来的是 mock 形状问题而不是业务问题
+            r.zrevrangebyscore.return_value = ["某模型", "开源"]
+            c.search.return_value = {"hits": {"total": {"value": len(hits)}, "hits": hits}}
+            resp = api_headlines(self.factory.get('/api/headlines/', query or {}))
+            return resp, json.loads(resp.content), c.search.call_args[1]
+
+    def test_same_title_from_two_sources_kept_once(self):
+        """同一事件被多源报道时不能刷屏——首页只有 20 个位置。"""
+        _, body, _ = self._call([
+            self._hit("某公司发布新模型", "news_ithome"),
+            self._hit("某公司发布新模型", "aihot_news"),
+            self._hit("另一件事", "news_solidot"),
+        ])
+        titles = [i["title"] for i in body["items"]]
+        self.assertEqual(titles, ["某公司发布新模型", "另一件事"])
+
+    def test_query_excludes_rankings_and_limits_window(self):
+        _, _, kwargs = self._call([self._hit("a", "news_ithome")])
+        must_not = kwargs["query"]["bool"]["must_not"][0]["terms"]["source"]
+        self.assertIn("douyin_hot", list(must_not))
+        self.assertIn("aihot_hot", list(must_not))
+        self.assertEqual(kwargs["query"]["bool"]["filter"][0]["range"]["create_date"]["gte"],
+                         "now-36H")
+        self.assertEqual(kwargs["sort"][0]["create_date"]["order"], "desc")
+
+    def test_hours_is_clamped_and_tolerant(self):
+        _, body, kwargs = self._call([], {'hours': '99999'})
+        self.assertEqual(
+            kwargs["query"]["bool"]["filter"][0]["range"]["create_date"]["gte"], "now-168H")
+        self.assertEqual(body["hours"], 168)
+        _, body, kwargs = self._call([], {'hours': 'abc'})
+        self.assertEqual(body["hours"], 36)   # 非法值退回默认，不报 400
+
+    def test_es_down_returns_503_not_500(self):
+        with patch('search.api_views.client') as c, patch('search.api_views.redis_cli') as r:
+            from search.api_views import api_headlines
+            r.get.return_value = None
+            c.search.side_effect = ConnectionError('es down')
+            resp = api_headlines(self.factory.get('/api/headlines/'))
+        self.assertEqual(resp.status_code, 503)
+
+    def test_cache_hit_skips_es(self):
+        from search.api_views import api_headlines
+        canned = {"hours": 36, "total": 1, "items": [{"title": "缓存里的"}], "top_keywords": []}
+        with patch('search.api_views.client') as c, patch('search.api_views.redis_cli') as r:
+            r.get.return_value = json.dumps(canned)
+            body = json.loads(api_headlines(
+                self.factory.get('/api/headlines/')).content)
+        self.assertEqual(body["items"][0]["title"], "缓存里的")
+        c.search.assert_not_called()

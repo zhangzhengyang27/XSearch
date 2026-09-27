@@ -9,7 +9,8 @@ import { isAdmin, ADMIN_PATHS } from './auth'
 // 页面组件全部懒加载：此前 9 个视图静态 import 打成单个 1.1MB chunk，
 // 读者只想搜个词也得先把「数据管理」表格的代码下完
 const routes: RouteRecordRaw[] = [
-  { path: '/', redirect: '/ai' },
+  { path: '/', component: () => import('./views/HomeView.vue'),
+    meta: { title: '', desc: '跨源中文新闻与 AI 资讯的全文检索站：今日要闻混排 + 关键词检索' } },
   { path: '/search', component: () => import('./views/SearchView.vue'),
     meta: { title: '搜索', desc: '按关键词检索已采集的新闻与 AI 资讯，支持来源、时间与排序筛选' } },
   { path: '/news', component: () => import('./views/NewsView.vue'),

@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -465,6 +466,63 @@ def api_stats(request):
     return JsonResponse(data)
 
 
+@require_http_methods(["GET"])
+def api_headlines(request):
+    """首页「今日要闻」：跨来源按发布时间倒序混排，同题只留一条。
+
+    不复用 /api/rankings?source=news：那个接口是单来源列表，首页要的是
+    "新闻 + AI 内容放一起看今天发生了什么"；同时必须排除榜单类，
+    榜单条目没有发布时间语义，混进来会长期占住"最新"的位置。
+    """
+    try:
+        hours = min(max(int(request.GET.get("hours", 36)), 1), 168)
+    except (TypeError, ValueError):
+        hours = 36
+    cache_key = "headlines:{}".format(hours)
+    try:
+        raw = redis_cli.get(cache_key)
+        if raw:
+            return JsonResponse(json.loads(raw))
+    except Exception:
+        pass  # Redis 不可用只是少了缓存，不影响出结果
+
+    try:
+        resp = client.search(
+            index=INDEX,
+            query={"bool": {
+                "must_not": [{"terms": {"source": list(RANKING_SOURCES)}}],
+                "filter": [{"range": {"create_date": {"gte": "now-{}H".format(hours)}}}],
+            }},
+            sort=[{"create_date": {"order": "desc", "missing": "_last"}}],
+            size=60,   # 多取一些再按标题去重，避免同一事件的多源报道刷屏
+        )
+    except Exception as e:
+        return _es_error(e)
+
+    items, seen = [], set()
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        key = re.sub(r"\s+", "", src.get("title") or "")[:40]
+        if key and key in seen:
+            continue
+        seen.add(key)
+        items.append(_list_item(hit, keep_content=src.get("source") in AI_SOURCES))
+        if len(items) >= 20:
+            break
+
+    try:
+        hot = redis_cli.zrevrangebyscore(
+            "search_keywords_set", "+inf", "-inf", start=0, num=6)
+    except Exception:
+        hot = []
+    payload = {"hours": hours, "total": len(items), "items": items, "top_keywords": hot}
+    try:
+        redis_cli.setex(cache_key, 120, json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+    return JsonResponse(payload)
+
+
 def api_health(request):
     """存活探针：真去问 ES 与 Redis，任一不可用就返回 503。
 
@@ -497,8 +555,7 @@ def api_health(request):
                          "index": {"name": INDEX, "docs": docs}}, status=code)
 
 
-# 新闻来源：news_rss 爬虫入库的 3 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）
-# 人民网（news_people）已停用：其 RSS 自 2025-06 起不再更新，见 spiders/news_rss.py 说明。
+# 新闻来源：news_rss 爬虫入库的 3 个 RSS 源（AIHOT 内容归 /ai 页，不混入新闻）# 人民网（news_people）已停用：其 RSS 自 2025-06 起不再更新，见 spiders/news_rss.py 说明。
 # 已入库的 news_people 文档仍可通过 /api/search 检索到，故保留在前端来源标签映射里。
 NEWS_SOURCES = ("news_chinanews", "news_ithome", "news_solidot")
 # AI 来源：AIHOT 精选动态 / 日报 / 热点榜（独立 AI 导航页使用）

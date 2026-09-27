@@ -17,6 +17,10 @@
 
 ## 功能特性
 
+### 🏠 首页（今日要闻 + 检索入口）
+- 跨来源按发布时间倒序混排，同题多源报道只保留一条
+- 热搜词引导；AI 内容进站内详情页，新闻条目直接回源站
+
 ### 🔍 搜索
 - 搜索结果实体卡片（新闻来源标签）
 - 搜索建议（ES completion）、容错纠错、排序切换、分面过滤
@@ -166,6 +170,7 @@ scrapy crawl douyin_hot      # 抖音热点榜（需 playwright）
 | `/api/stats/` | GET | 公开 | 数据概览统计（依赖故障会降级成 `es_ok:false`，**不适合当探针**） |
 | `/api/health/` | GET | 公开 | 存活探针：真问 ES/Redis，任一不可用返回 **503**（镜像 HEALTHCHECK 打的就是它） |
 | `/api/rankings/` | GET | 公开 | 榜单 / 新闻列表（AI 热点榜、抖音榜 + 新闻各源 + AI 日报） |
+| `/api/headlines/` | GET | 公开 | 首页「今日要闻」：跨源混排 + 同题去重（`hours` 默认 36，上限 168） |
 | `/api/doc/<id>/` | GET | 公开 | 单篇详情：按 ES 文档 `_id` 精确取全文（列表类接口都回传 `id`） |
 | `/api/img/` | GET | 公开 | 图片代理（本地磁盘缓存，域名白名单） |
 | `/api/auth/login/` | POST | 公开 | 管理员登录；**按 IP 限速**，5 次失败锁 15 分钟 |
@@ -300,6 +305,8 @@ pyflakes，见 `ruff.toml`）→ Django 测试 → 前端 `npm ci` + 构建 → 
       （naive 本地时间被 ES 当 UTC），会随 7/30 天窗口滚动自然退场；要立刻校正，
       对 `crawled_at < 部署时刻` 的文档跑一次 update_by_query 减 8 小时
       （「数据管理」页先抽查几条再动手）
+- [ ] 部署后确认 `curl https://你的域名/robots.txt` 与 `/sitemap.xml` 返回 200
+      （不是被 SPA 兜底成 index.html），然后到 Google Search Console 提交 sitemap
 - [ ] 配好告警邮箱并发一封自检：
       `python manage.py shell -c "from search.notify import notify; print(notify('selftest','告警通道自检'))"`
       （收到信才说明停更会在 15 分钟内被你发现，而不是靠打开网站撞见）

@@ -5,9 +5,10 @@
         <span class="logo">X</span><span class="word">Search</span>
       </div>
       <el-menu mode="horizontal" :default-active="$route.path" router :ellipsis="false" class="nav">
-        <el-menu-item index="/ai">AI 讯息</el-menu-item>
+        <el-menu-item index="/">首页</el-menu-item>
         <el-menu-item index="/search">搜索</el-menu-item>
         <el-menu-item index="/news">新闻</el-menu-item>
+        <el-menu-item index="/ai">AI 讯息</el-menu-item>
         <el-menu-item index="/rankings">抖音榜单</el-menu-item>
         <el-menu-item index="/stats">数据概览</el-menu-item>
         <el-menu-item v-if="isAdmin" index="/crawl">采集管理</el-menu-item>

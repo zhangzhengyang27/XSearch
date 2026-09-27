@@ -58,6 +58,13 @@ export interface RankingsResult {
   items: DocItem[]
 }
 
+export interface HeadlinesResult {
+  hours: number
+  total: number
+  items: DocItem[]
+  top_keywords: string[]
+}
+
 export interface StatsResult {
   es_ok: boolean
   es_error?: string
@@ -258,6 +265,7 @@ export const api = {
   crawlHistory: (limit = 50) => request<{ history: CrawlHistoryItem[] }>(`/api/crawl/history/?limit=${limit}`),
   crawlStats: () => request<CrawlStatsResult>('/api/crawl/stats/'),
   rankings: (source: string, p = 1) => request<RankingsResult>(`/api/rankings/?source=${encodeURIComponent(source)}&p=${p}`),
+  headlines: (hours = 36) => request<HeadlinesResult>(`/api/headlines/?hours=${hours}`),
   crawlSpiders: () => request<{ spiders: SpiderInfo[] }>('/api/crawl/spiders/'),
   // 管理员登录（采集管理页鉴权）
   adminLogin: (username: string, password: string) => request<AdminLoginResult>('/api/auth/login/', {
