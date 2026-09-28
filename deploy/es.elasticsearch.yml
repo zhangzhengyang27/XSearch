@@ -1,0 +1,7 @@
+# 挂载为容器内 /usr/share/elasticsearch/config/elasticsearch.yml。
+# 8.15.3 官方镜像的启动脚本只可靠转换部分点号环境变量（discovery.type /
+# xpack.security.enabled 生效，path.repo 实测不生效 → 快照仓库注册报
+# "path.repo is empty"），所以 path.repo 必须写在这里，不依赖 env。
+cluster.name: "docker-cluster"
+network.host: 0.0.0.0
+path.repo: /snapshots

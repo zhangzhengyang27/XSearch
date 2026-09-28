@@ -48,10 +48,12 @@ if DEBUG and not ALLOWED_HOSTS:
 
 # ---------- 生产环境安全配置（DEBUG=False 时自动启用） ----------
 if not DEBUG:
-    # HTTPS 相关配置：仅在站点确实部署在 HTTPS 之后开启（常见 docker-compose
-    # 链路是纯 HTTP 的 nginx 反代，开启会导致 Cookie 不发送/HSTS 拒绝访问）
-    # SECURE_SSL_REDIRECT = True
-    # SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # HTTPS 相关配置：站点已在 HTTPS 之下（VPS nginx + Certbot 证书）。
+    # 不开 SSL_REDIRECT：NAS 局域网内还有 http://…:5600 的直连入口，重定向会打断它。
+    SECURE_SSL_REDIRECT = False
+    # 采信反代链路写入的 X-Forwarded-Proto（VPS nginx 与 deploy/nginx.conf 均已下发），
+    # 否则 request.build_absolute_uri 生成的 sitemap/robots 链接全是 http://，收录价值归零
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     # SECURE_HSTS_SECONDS = 31536000  # 1 年
     # SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     # SECURE_HSTS_PRELOAD = True
