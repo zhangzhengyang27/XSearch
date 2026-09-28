@@ -840,12 +840,17 @@ class CrawlStateTransitionTests(TempStateMixin, SimpleTestCase):
             self.cm.CrawlManager()
         self.assertEqual(self.read_history()[0]['status'], 'running')
 
-    def test_atomic_write_leaves_no_temp_file(self):
+    def test_atomic_write_leaves_main_parsable(self):
+        """终态回写后主文件必须立即可解析。
+
+        .tmp 现在是刻意留下的恢复检查点（生产是单文件 bind mount，rename
+        必然 EBUSY，见 _write_json_atomic），不再断言它不存在。
+        """
         self._start_fake("'item_scraped_count': 9,")
         self.proc.finish(0)
         self._await_terminal()
-        self.assertFalse(os.path.exists(self.hist + '.tmp'))
         self.read_history()  # 能解析即为完整 JSON
+        self.assertEqual(self.read_history()[0]['status'], 'completed')
 
 
 class SchedulePersistenceAlertsTests(TempStateMixin, SimpleTestCase):
@@ -899,6 +904,28 @@ class SchedulePersistenceAlertsTests(TempStateMixin, SimpleTestCase):
             self.assertIn('"jobs"', f.read())
         self.notify.assert_called()
         self.assertEqual(self.notify.call_args[0][0], 'schedule-corrupt')
+
+    def test_write_leaves_checkpoint_tmp_and_parsable_main(self):
+        """落盘后主文件可直接解析且 .tmp 检查点在场。
+
+        生产 compose 把状态文件以单文件 bind 挂进容器，rename（os.replace）
+        必然 EBUSY——旧实现因此让采集历史在线上一次都没写成过。
+        """
+        payload = [{'job_id': 'j1', 'spider': 'news_rss'}]
+        self.cm._write_json_atomic(self.hist, payload)
+        with open(self.hist, encoding='utf-8') as f:
+            self.assertEqual(json.load(f), payload)
+        with open(self.hist + '.tmp', encoding='utf-8') as f:
+            self.assertEqual(json.load(f), payload)
+
+    def test_corrupt_history_recovers_from_tmp(self):
+        """主文件坏时从 .tmp 恢复，而不是降级成空历史。"""
+        payload = [{'job_id': 'j1', 'status': 'completed'}]
+        with open(self.hist + '.tmp', 'w', encoding='utf-8') as f:
+            json.dump(payload, f)
+        with open(self.hist, 'w', encoding='utf-8') as f:
+            f.write('{"trunc')  # 原地覆盖途中被 kill 的典型现场
+        self.assertEqual(self.cm.CrawlManager._load_history(), payload)
 
     def test_jobs_registered_with_misfire_grace(self):
         """错过触发窗口要在宽限期内补跑，且多次错过合并成一次。"""

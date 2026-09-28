@@ -22,17 +22,57 @@ def _alert(key, subject, body=""):
 
 
 def _write_json_atomic(path, payload):
-    """临时文件 + os.replace 落盘。
+    """数据落盘：完整写 .tmp 检查点，再原地覆盖写回主文件。
 
-    直接 open(path, "w") 写到一半被 kill 会留下截断的 JSON，下次启动 _load
-    解析失败 = 所有定时任务配置与采集历史静默清零。
+    两条路各有个坑，都得防：
+    - 直接 open(path, "w")：写到一半被 kill 会留下截断的 JSON，下次启动
+      _load 解析失败 = 所有定时任务配置与采集历史静默清零；
+    - 临时文件 + os.replace：生产 compose 把本文件以【单文件 bind】挂进容器，
+      rename 覆盖 bind 目标必然 EBUSY（Device or resource busy，2026-09-28
+      线上实测，采集历史一次都没写成过）；同 inode 的普通写则没问题——
+      db.sqlite3 一直就是这么工作的。
+    所以：先写 .tmp（fsync），成功后原地覆盖主文件。中途被 kill 时主文件
+    要么还是旧全量、要么有 .tmp 兜底（见 _load_json_with_recovery）。
     """
     tmp = path + ".tmp"
+    data = json.dumps(payload, ensure_ascii=False, indent=2)
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write(data)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _load_json_with_recovery(path):
+    """读 JSON；主文件解析失败时回退读 .tmp（写入端原地覆盖途中被 kill 的恢复路径）。
+
+    返回 (data, from_tmp)。两边都解析不了：把主文件现场备份成 .corrupt-* 再
+    抛出，由调用方按各自策略降级 + 告警。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f), False
+    except Exception as primary_err:
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            logger.warning("%s 解析失败（%s），已从 %s 恢复", path, primary_err, tmp)
+            return data, True
+        except Exception:
+            # 先把现场备份下来再抛：直接降级会让下一次保存覆盖掉唯一
+            # 能判断"什么时候坏的"的证据
+            backup = path + ".corrupt-{}".format(int(time.time()))
+            try:
+                shutil.copy2(path, backup)
+                logger.error("%s 损坏（%s），.tmp 也不可用，已备份现场到 %s",
+                             path, primary_err, backup)
+            except Exception:
+                logger.error("%s 损坏（%s），且现场备份失败", path, primary_err)
+            raise
 
 
 def _pid_alive(pid):
@@ -103,17 +143,10 @@ class CrawlManager(object):
         if not os.path.exists(HISTORY_FILE):
             return []
         try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            data, _ = _load_json_with_recovery(HISTORY_FILE)
+            return data
         except Exception as e:
-            # 先把现场备份下来再降级：直接 return [] 会让下一次保存覆盖掉唯一
-            # 能判断"什么时候坏的"的证据
-            backup = HISTORY_FILE + ".corrupt-{}".format(int(time.time()))
-            try:
-                shutil.copy2(HISTORY_FILE, backup)
-                logger.error("采集历史文件损坏（%s），已备份原文件到 %s", e, backup)
-            except Exception:
-                logger.error("采集历史文件损坏，且备份失败：%s", e)
+            # 现场备份已在 _load_json_with_recovery 里做过
             _alert("history-corrupt", "采集历史文件损坏，已按空历史降级", str(e))
             return []
 
@@ -450,19 +483,14 @@ class ScheduleManager(object):
         if not os.path.exists(SCHEDULE_FILE):
             return
         try:
-            with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data, _ = _load_json_with_recovery(SCHEDULE_FILE)
             self._jobs = data.get("jobs", {})
             self._history = data.get("history", [])[-20:]
         except Exception as e:
-            # 这份文件就是 cron 配置本身：解析失败若不把现场留下来，下一次
-            # add/toggle 的保存会用空 jobs 覆盖掉用户配好的全部定时任务
-            backup = SCHEDULE_FILE + ".corrupt-{}".format(int(time.time()))
-            try:
-                shutil.copy2(SCHEDULE_FILE, backup)
-                logger.error("定时任务配置损坏（%s），已备份原文件到 %s", e, backup)
-            except Exception:
-                logger.error("定时任务配置损坏，且备份失败：%s", e)
+            # 现场备份已在 _load_json_with_recovery 里做过；这份文件就是 cron
+            # 配置本身，这里若不降级，下一次 add/toggle 的保存会用空 jobs
+            # 覆盖掉用户配好的全部定时任务
+            logger.error("定时任务配置不可用，降级为空配置：%s", e)
             _alert("schedule-corrupt", "定时任务配置损坏，自动调度已不可用", str(e))
 
     @staticmethod
